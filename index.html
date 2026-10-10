@@ -1,0 +1,1006 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#11110f">
+<title>Halka — Hikâyelerin buluştuğu yer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+:root {
+  --bg:#11110f; --panel:#1b1b18; --panel2:#22221e;
+  --text:#f4f0e8; --muted:#a7a295; --line:#35352f;
+  --gold:#d9b978; --gold2:#f0d8a2; --red:#d7786a;
+  --ring-writing:#7F77DD; --ring-drawing:#1D9E75;
+  --ring-photo:#EF9F27; --ring-video:#D85A30;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Inter,Segoe UI,Arial,sans-serif}
+h1, h2, h3, .brand span:last-child, .eyebrow { font-family: 'Fredoka', sans-serif !important; }
+button,input,textarea,select{font:inherit}
+button{cursor:pointer}
+a{color:var(--gold2);text-decoration:none}
+.topbar{height:96px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 max(20px,calc((100% - 1100px)/2));gap:16px;position:sticky;top:0;background:#11110fee;backdrop-filter:blur(14px);z-index:5}
+.brand{display:flex;align-items:center;gap:16px;font-size:30px;font-weight:700;letter-spacing:.5px;color:var(--text)}
+.logo-box{width:84px;height:84px;position:relative;display:flex;align-items:center;justify-content:center}
+.logo-img-layer{width:100%;height:100%;object-fit:contain;display:block;animation:logoPulse 3s ease-in-out infinite}
+@keyframes logoPulse{0%,100%{transform:scale(1);filter:drop-shadow(0 0 2px rgba(217,185,120,0.2))}50%{transform:scale(1.04);filter:drop-shadow(0 0 8px rgba(217,185,120,0.5))}}
+.nav{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.btn{border:1px solid var(--line);border-radius:12px;background:var(--panel2);color:var(--text);padding:10px 16px;transition:.2s;font-family:'Fredoka',sans-serif}
+.btn:hover{border-color:var(--gold);transform:translateY(-1px)}
+.btn.primary{background:var(--gold);color:#191711;border-color:var(--gold);font-weight:600}
+.btn.ghost{background:transparent}
+.btn.danger{color:var(--red)}
+.btn.small{padding:6px 11px;font-size:13px}
+main{max-width:920px;margin:0 auto;padding:30px 18px 80px}
+.hero{padding:32px 0 24px}
+.eyebrow{color:var(--gold);font-size:13px;font-weight:600;letter-spacing:2px;text-transform:uppercase}
+h1,h2,h3,p{margin-top:0}
+h1{font-size:clamp(36px,6vw,56px);font-weight:600;line-height:1.15;margin:13px 0}
+h2{font-weight:600}
+.subtitle{color:var(--muted);line-height:1.7;max-width:650px;font-family:Inter,sans-serif}
+.section-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:30px 0 16px}
+.section-head h2{margin:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:22px;margin-bottom:14px}
+.card h3{font-size:24px;font-weight:600;margin:9px 0}
+.card p{line-height:1.65;color:#d3cec2;white-space:pre-wrap;overflow-wrap:anywhere;font-family:Inter,sans-serif}
+.meta{color:var(--muted);font-size:13px;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.pill{border:1px solid #5a4d34;border-radius:30px;padding:4px 10px;color:var(--gold2);font-size:11px;font-family:'Fredoka',sans-serif}
+.form-card{max-width:560px;margin:24px auto}
+.field{margin:16px 0}
+label{display:block;color:#d8d2c5;font-size:13px;margin-bottom:7px}
+input,textarea,select{width:100%;background:#121210;border:1px solid var(--line);border-radius:12px;color:var(--text);padding:12px 14px;outline:none}
+input:focus,textarea:focus,select:focus{border-color:var(--gold)}
+textarea{min-height:130px;resize:vertical;line-height:1.6}
+.small{font-size:12px;color:var(--muted);line-height:1.5}
+.message{margin-top:13px;color:var(--gold2);line-height:1.6;overflow-wrap:anywhere}
+.message.error{color:var(--red)}
+.empty{text-align:center;padding:38px 18px;color:var(--muted);border:1px dashed var(--line);border-radius:15px;line-height:1.7}
+.profile-head{display:flex;gap:17px;align-items:center;margin-bottom:24px}
+.avatar{width:62px;height:62px;flex-shrink:0;border-radius:50%;background:#353024;color:var(--gold2);display:grid;place-items:center;font-family:'Fredoka',sans-serif;font-size:27px}
+.profile-head h1{font-size:34px;margin:0 0 5px}
+.chapter{border-left:3px solid var(--gold);padding:4px 0 4px 18px;margin:22px 0}
+.chapter h3{font-size:22px}
+.chapter-body{white-space:pre-wrap;line-height:1.9;color:#e3ded3;overflow-wrap:anywhere;font-family:Inter,sans-serif}
+.loading{min-height:60vh;display:grid;place-items:center;text-align:center;color:var(--gold)}
+.spinner-container{display:flex;flex-direction:column;align-items:center;gap:12px}
+.spinner-rings{display:flex;gap:8px;align-items:center;justify-content:center}
+.load-ring{width:14px;height:14px;border-radius:50%;animation:ringLoad 1.6s ease-in-out infinite}
+.load-ring:nth-child(1){background:var(--ring-writing);animation-delay:0s}
+.load-ring:nth-child(2){background:var(--ring-drawing);animation-delay:.4s}
+.load-ring:nth-child(3){background:var(--ring-photo);animation-delay:.8s}
+.load-ring:nth-child(4){background:var(--ring-video);animation-delay:1.2s}
+@keyframes ringLoad{0%,100%{transform:scale(0.6);opacity:0.3}50%{transform:scale(1.3);opacity:1;box-shadow:0 0 10px currentColor}}
+footer{text-align:center;color:var(--muted);font-size:12px;padding:28px 15px;border-top:1px solid var(--line)}
+.hidden{display:none!important}
+hr{border:0;border-top:1px solid var(--line);margin:22px 0}
+.halka-loader{width:150px;height:auto;display:block;overflow:visible}
+.lr{opacity:0;animation-duration:3.6s;animation-timing-function:ease-in-out;animation-iteration-count:infinite}
+.lr1{animation-name:lr1}.lr2{animation-name:lr2}.lr3{animation-name:lr3}.lr4{animation-name:lr4}
+@keyframes lr1{0%{opacity:0}12%,82%{opacity:1}92%,100%{opacity:0}}
+@keyframes lr2{0%,15%{opacity:0}27%,82%{opacity:1}92%,100%{opacity:0}}
+@keyframes lr3{0%,30%{opacity:0}42%,82%{opacity:1}92%,100%{opacity:0}}
+@keyframes lr4{0%,45%{opacity:0}57%,82%{opacity:1}92%,100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.lr{animation:none;opacity:1}}
+.logo-img-layer svg{width:100%;height:100%;display:block}
+.halka-logo{overflow:visible}
+.halka-logo .lr{opacity:1;animation:none}
+.hero-split{display:flex;align-items:center;justify-content:space-between;gap:28px;flex-wrap:wrap}
+.hero-text{flex:1 1 340px;min-width:0}
+.hero-art{flex:0 0 auto;margin:0 auto}
+.hero-art svg{width:clamp(220px,34vw,330px);height:auto;display:block;filter:drop-shadow(0 0 22px rgba(217,185,120,.18))}
+.tabsbar{border-bottom:1px solid var(--line);background:#14140f}
+.tabs{max-width:1100px;margin:0 auto;padding:8px 14px;display:flex;flex-wrap:wrap;gap:6px}
+.dd{position:relative}
+.tab{background:transparent;border:1px solid transparent;color:var(--muted);padding:9px 14px;border-radius:12px;font-family:'Fredoka',sans-serif;font-weight:600;font-size:15px}
+.tab:hover,.tab.on,.tab[aria-expanded="true"]{color:var(--gold2);background:var(--panel2);border-color:var(--line)}
+.caret{font-size:11px;margin-left:2px}
+.dd-panel{position:absolute;top:calc(100% + 6px);left:0;min-width:230px;max-height:70vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:8px;box-shadow:0 14px 40px #000a;z-index:30}
+.dd-panel.right,.tabs .dd:nth-last-child(-n+2) .dd-panel{left:auto;right:0}
+.dd-panel[hidden]{display:none}
+.dd-panel a,.dd-panel .acc{display:block;width:100%;text-align:left;background:none;border:0;color:var(--text);padding:9px 12px;border-radius:9px;font-size:14px}
+.dd-panel a:hover,.dd-panel .acc:hover{background:var(--panel2);color:var(--gold2)}
+.dd-panel .grp{color:var(--muted);font-size:12px;padding:8px 12px 2px}
+.dd-panel .acc{display:flex;justify-content:space-between;font-family:'Fredoka',sans-serif;font-weight:600;font-size:15px}
+.acc-body{margin:0 0 6px 12px;padding-left:8px;border-left:2px solid var(--line)}
+.plus{width:48px;height:48px;border-radius:50%;border:0;background:var(--gold);color:#191711;font-size:30px;line-height:1;font-weight:600;display:grid;place-items:center;transition:transform .2s}
+.plus[aria-expanded="true"]{transform:rotate(45deg)}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px}
+.chip{border:1px solid var(--line);border-radius:30px;padding:6px 13px;font-size:13px;color:var(--muted)}
+.chip:hover{border-color:var(--gold);color:var(--gold2)}
+.chip.on{background:var(--gold);color:#191711;border-color:var(--gold)}
+.media{display:block;width:100%;max-height:520px;object-fit:contain;background:#0c0c0a;border-radius:12px;margin:12px 0}
+.searchbar{display:flex;gap:10px;margin:18px 0 22px;flex-wrap:wrap;align-items:center}
+.searchbar input{flex:1 1 240px;padding:12px 16px;border-radius:30px;background:var(--panel2);border:1px solid var(--line)}
+.searchbar input:focus{border-color:var(--gold)}
+.sortselect{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:12px 16px;border-radius:30px;cursor:pointer}
+.post-actions{display:flex;gap:12px;align-items:center;margin-top:14px;flex-wrap:wrap}
+.like-btn{display:inline-flex;align-items:center;gap:7px;background:transparent;border:1px solid var(--line);border-radius:30px;padding:7px 14px;color:var(--muted);font-size:14px;font-family:'Fredoka',sans-serif;transition:.2s}
+.like-btn:hover{border-color:var(--red);color:var(--red)}
+.like-btn.liked{background:rgba(215,120,106,.15);border-color:var(--red);color:var(--red)}
+.like-btn .heart{font-size:16px}
+.comment-toggle{background:transparent;border:1px solid var(--line);border-radius:30px;padding:7px 14px;color:var(--muted);font-size:14px;font-family:'Fredoka',sans-serif}
+.comment-toggle:hover{border-color:var(--gold);color:var(--gold2)}
+.comments-section{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.comment{background:var(--panel2);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.comment-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
+.comment-author{font-family:'Fredoka',sans-serif;font-weight:600;color:var(--gold2);font-size:14px}
+.comment-date{color:var(--muted);font-size:12px}
+.comment-body{color:#d3cec2;line-height:1.6;font-family:Inter,sans-serif;white-space:pre-wrap;overflow-wrap:anywhere}
+.comment-form{margin-top:14px;display:flex;flex-direction:column;gap:10px}
+.comment-form textarea{min-height:70px}
+.comment-del{background:none;border:0;color:var(--muted);font-size:12px;cursor:pointer;margin-left:8px}
+.comment-del:hover{color:var(--red)}
+@media(max-width:600px){
+ .topbar{height:auto;min-height:80px;padding:12px 15px;align-items:flex-start}
+ .brand{font-size:24px}
+ .logo-box{width:64px;height:64px}
+ .nav{justify-content:flex-end}.nav .btn{padding:8px 10px;font-size:12px}
+ main{padding:20px 14px 55px}.card{padding:17px}.hero{padding-top:20px}
+ .section-head{align-items:flex-start;flex-direction:column}
+}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<linearGradient id="hkgP" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F6D5A0"/><stop offset="0.55" stop-color="#F0956B"/><stop offset="1" stop-color="#D4537E"/></linearGradient>
+<radialGradient id="hkgL" cx="0.5" cy="0.5" r="0.5"><stop offset="0" stop-color="#FFF6C8" stop-opacity="0.95"/><stop offset="1" stop-color="#FFF6C8" stop-opacity="0"/></radialGradient>
+<pattern id="hkgrain" patternUnits="userSpaceOnUse" width="3" height="3"><rect x="0" y="0" width="0.8" height="0.8" fill="#3A2418" opacity="0.28"/><rect x="1.8" y="1.6" width="0.6" height="0.6" fill="#FFFFFF" opacity="0.35"/></pattern>
+<pattern id="hkhand" patternUnits="userSpaceOnUse" width="36" height="24"><rect width="36" height="24" fill="#F4EFE1"/><rect y="5" width="36" height="0.8" fill="#8FA9CF"/><rect y="11" width="36" height="0.8" fill="#8FA9CF"/><rect y="17" width="36" height="0.8" fill="#8FA9CF"/><rect y="23" width="36" height="0.8" fill="#8FA9CF"/><g fill="none" stroke="#2B3F7A" stroke-width="0.7" stroke-linecap="round"><path d="M2 3.8 q1 -2.6 2 0 t2 0 t2 0 t2 0 M12 3.8 q1 -2.4 2 0 t2 0 t2 0 M22 3.8 q1 -2.8 2 0 t2 0 t2 0 t2 0"/><path d="M2 9.8 q1 -2.2 2 0 t2 0 t2 0 t2 0 t2 0 M14 9.8 q1 -2.4 2 0 t2 0 t2 0"/><path d="M2 15.8 q1 -2.4 2 0 t2 0 t2 0"/><path d="M2 21.8 q1 -2.6 2 0 t2 0 t2 0 t2 0 M14 21.8 q1 -2.2 2 0 t2 0 t2 0 t2 0 t2 0"/></g></pattern>
+<pattern id="hkpTL" patternUnits="userSpaceOnUse" x="0" y="0" width="700" height="300"><rect width="700" height="300" fill="url(#hkhand)"/><circle cx="285.8" cy="88.6" r="3.6" fill="#26376B"/><circle cx="290" cy="84" r="1" fill="#26376B"/><circle cx="282" cy="92" r="0.9" fill="#26376B"/><circle cx="288.5" cy="93.5" r="1.1" fill="#26376B"/><circle cx="284.3" cy="123" r="2.4" fill="#26376B"/><circle cx="320.3" cy="76.1" r="2.8" fill="#26376B"/><path d="M320.3 78 L320.3 84" stroke="#26376B" stroke-width="1.2" stroke-linecap="round" fill="none"/><circle cx="300" cy="136" r="1.2" fill="#26376B"/><path d="M298 74 q8 -3 16 -1" stroke="#26376B" stroke-width="1.3" stroke-linecap="round" fill="none"/></pattern>
+<pattern id="hkpTR" patternUnits="userSpaceOnUse" x="0" y="0" width="700" height="300"><rect width="700" height="300" fill="#FBFBF8"/><g fill="none" stroke="#8A8A8A" stroke-width="0.5"><path d="M330 90 Q345 82 360 88"/><path d="M380 138 q10 -4 20 -14"/><path d="M352 144 L358 136 M355 145 L361 137 M358 146 L364 138"/></g><g fill="none" stroke-linecap="round"><path d="M340 74 Q360 66 380 76" stroke="#E24B4A" stroke-width="4"/><path d="M392 84 Q404 100 396 118" stroke="#378ADD" stroke-width="4.5"/><path d="M394 128 Q384 142 366 140" stroke="#EF9F27" stroke-width="4"/><path d="M352 140 Q336 130 334 112" stroke="#1D9E75" stroke-width="4"/><path d="M336 100 Q338 84 352 74" stroke="#7F77DD" stroke-width="3"/></g><circle cx="372" cy="78" r="4" fill="#D4537E"/><circle cx="378" cy="72" r="1.6" fill="#D4537E"/><circle cx="365" cy="73" r="1.2" fill="#D4537E"/><circle cx="383" cy="82" r="1" fill="#D4537E"/><ellipse cx="400" cy="100" rx="4" ry="2" transform="rotate(-30 400 100)" fill="#1D9E75"/><circle cx="398" cy="118" r="3.5" fill="#EF9F27"/><circle cx="345" cy="132" r="3" fill="#7F77DD"/><path d="M344 112 L344 122" stroke="#378ADD" stroke-width="1.6" stroke-linecap="round"/><circle cx="344" cy="123.5" r="1.6" fill="#378ADD"/><circle cx="362" cy="141" r="1.4" fill="#E24B4A"/><circle cx="337" cy="86" r="1.5" fill="#EF9F27"/></pattern>
+<pattern id="hkpBR" patternUnits="userSpaceOnUse" x="0" y="0" width="700" height="300"><rect x="322" y="118" width="92" height="92" fill="url(#hkgP)"/><circle cx="398" cy="140" r="26" fill="url(#hkgL)"/><rect x="322" y="118" width="92" height="92" fill="url(#hkgrain)"/></pattern>
+<circle id="hkcTL" cx="312" cy="107" r="32" fill="none"/><circle id="hkcTR" cx="368" cy="107" r="32" fill="none"/><circle id="hkcBR" cx="368" cy="163" r="32" fill="none"/><circle id="hkcBL" cx="312" cy="163" r="32" fill="none"/>
+<circle id="hkhIn" cx="312" cy="163" r="29" fill="none"/><circle id="hkhOut" cx="312" cy="163" r="35" fill="none"/>
+<path id="hka1" d="M 333.8 83.6 A 32 32 0 0 1 343.4 100.9" fill="none"/><path id="hka2" d="M 391.4 128.8 A 32 32 0 0 1 374.1 138.4" fill="none"/><path id="hka3" d="M 346.2 186.4 A 32 32 0 0 1 336.6 169.1" fill="none"/><path id="hka4" d="M 305.9 138.4 A 32 32 0 0 1 288.6 128.8" fill="none"/>
+</defs></svg>
+<header class="topbar">
+  <a class="brand" href="#/" aria-label="Halka ana sayfa">
+    <div class="logo-box"><div class="logo-img-layer" id="brandLogo" role="img" aria-label="Halka logosu"></div></div>
+    <span>Halka</span>
+  </a>
+  <nav class="nav" id="nav"></nav>
+</header>
+<div class="tabsbar"><div class="tabs" id="tabs"></div></div>
+<main id="app">
+  <div class="loading">
+    <div class="spinner-container">
+      <div class="spinner-rings"></div>
+      <span>Halka hazırlanıyor…</span>
+    </div>
+  </div>
+</main>
+<footer>Halka · Hikâyeler paylaşıldıkça çoğalır.</footer>
+<script>/* HALKA SUPABASE AYARLARI */
+const SUPABASE_URL = 'https://srdjknlfqnmsozyewvxa.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_2be-TiF4ZoZg_HNmA8dW1g_1UzYtfCr';
+
+const app = document.getElementById('app');
+const nav = document.getElementById('nav');
+
+const HALKA_LOADER = `<svg class="halka-loader" viewBox="266 62 148 146" aria-hidden="true">
+<g class="lr lr1"><use href="#hkcTL" stroke="#A89F88" stroke-width="12.4"/><use href="#hkcTL" stroke="url(#hkpTL)" stroke-width="10.4"/></g>
+<g class="lr lr2"><use href="#hkcTR" stroke="#C7C5BC" stroke-width="12.4"/><use href="#hkcTR" stroke="url(#hkpTR)" stroke-width="10.4"/></g>
+<g class="lr lr3"><use href="#hkcBR" stroke="#EFE4CC" stroke-width="12.6"/><use href="#hkcBR" stroke="url(#hkpBR)" stroke-width="8.6"/></g>
+<g class="lr lr4"><use href="#hkcBL" stroke="#8C8C96" stroke-width="12.4"/><use href="#hkcBL" stroke="#1B1B1F" stroke-width="10.4"/><use href="#hkhIn" stroke="#F1EFE8" stroke-width="2.4" stroke-dasharray="2.4 2.4"/><use href="#hkhOut" stroke="#F1EFE8" stroke-width="2.4" stroke-dasharray="2.6 2.6"/></g>
+<g class="lr lr1"><use href="#hka1" stroke="#A89F88" stroke-width="12.4"/><use href="#hka1" stroke="url(#hkpTL)" stroke-width="10.4"/><use href="#hka4" stroke="#A89F88" stroke-width="12.4"/><use href="#hka4" stroke="url(#hkpTL)" stroke-width="10.4"/></g>
+<g class="lr lr2"><use href="#hka2" stroke="#C7C5BC" stroke-width="12.4"/><use href="#hka2" stroke="url(#hkpTR)" stroke-width="10.4"/></g>
+<g class="lr lr3"><use href="#hka3" stroke="#EFE4CC" stroke-width="12.6"/><use href="#hka3" stroke="url(#hkpBR)" stroke-width="8.6"/></g>
+</svg>`;
+
+function fillLoaders() {
+  document.querySelectorAll('.spinner-rings').forEach(el => {
+    if (!el.querySelector('.halka-loader')) el.innerHTML = HALKA_LOADER;
+  });
+}
+fillLoaders();
+new MutationObserver(fillLoaders).observe(app, { childList: true, subtree: true });
+const HALKA_LOGO = HALKA_LOADER.replace('class="halka-loader"', 'class="halka-logo"');
+document.getElementById('brandLogo').innerHTML = HALKA_LOGO;
+
+let sb = null;
+let currentUser = null;
+let currentProfile = null;
+let cachedPosts = [];
+let currentAuthMode = 'signup';
+let feedSort = 'new';
+let feedSearch = '';
+
+const categories = ['Fantastik','Bilim Kurgu','Romantik','Gizem','Korku','Macera','Dram','Şiir','Diğer'];
+
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&':'&amp;', '<':'&lt;', '>':'&gt;',
+    '"':'&quot;', "'":'&#39;'
+  })[ch]);
+}
+function initials(name) {
+  const s = String(name || 'H').trim();
+  return esc(s ? s[0].toLocaleUpperCase('tr-TR') : 'H');
+}
+function showMessage(text, error = false) {
+  const el = document.getElementById('message');
+  if (!el) return;
+  el.textContent = text;
+  el.className = error ? 'message error' : 'message';
+}
+function displayName(profile, fallback = 'Halka yazarı') {
+  return profile?.display_name?.trim() || profile?.username || fallback;
+}
+function formatDate(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleDateString('tr-TR', { day:'numeric', month:'long', year:'numeric' });
+}
+function categoryOptions(selected = 'Fantastik') {
+  return categories.map(c => `<option value="${esc(c)}" ${c === selected ? 'selected' : ''}>${esc(c)}</option>`).join('');
+}
+
+function setNav() {
+  nav.innerHTML = `
+    ${currentUser ? `
+      <a class="btn ghost" href="#/profile">Profilim</a>
+      <button class="btn" id="logoutBtn">Çıkış</button>
+    ` : `
+      <a class="btn ghost" href="#/auth">Giriş</a>
+      <a class="btn primary" href="#/auth?signup">Hesap oluştur</a>
+    `}
+    ${plusMenuHTML()}
+  `;
+  document.getElementById('logoutBtn')?.addEventListener('click', async () => {
+    const { error } = await sb.auth.signOut();
+    if (error) alert(error.message);
+    location.hash = '#/';
+  });
+  renderTabs();
+}
+
+function renderHome() {
+  app.innerHTML = `
+    <section class="hero hero-split">
+      <div class="hero-text">
+      <div class="eyebrow">Kelimelerin buluşma noktası</div>
+      <h1>Her hikâye bir<br>halka oluşturur.</h1>
+      <p class="subtitle">Kendi dünyanı yaz, hikâyelerini paylaş ve yeni yazarlarla tanış. Halka'da her anlatının bir yeri var.</p>
+      ${currentUser ? '<a class="btn primary" href="#/write">Hikâyeni yaz →</a>' : '<a class="btn primary" href="#/auth?signup">Halka’ya katıl →</a>'}
+      </div>
+      <div class="hero-art">${HALKA_LOGO}</div>
+    </section>
+    <div class="searchbar">
+      <input type="text" id="searchInput" placeholder="Eserlerde ara…" value="${esc(feedSearch)}">
+      <select class="sortselect" id="sortSelect">
+        <option value="new" ${feedSort === 'new' ? 'selected' : ''}>En yeni</option>
+        <option value="liked" ${feedSort === 'liked' ? 'selected' : ''}>En çok beğenilen</option>
+      </select>
+      <button class="btn ghost" id="refreshBtn">Yenile ↻</button>
+    </div>
+    <div id="feed"><div class="loading"><div class="spinner-container"><div class="spinner-rings"></div><span>Hikâyeler yükleniyor…</span></div></div></div>
+  `;
+  document.getElementById('refreshBtn').addEventListener('click', loadFeed);
+  document.getElementById('sortSelect').addEventListener('change', e => {
+    feedSort = e.target.value;
+    loadFeed();
+  });
+  document.getElementById('searchInput').addEventListener('input', e => {
+    feedSearch = e.target.value.toLowerCase().trim();
+    loadFeed();
+  });
+  loadFeed();
+}
+
+async function loadFeed() {
+  const feed = document.getElementById('feed');
+  if (!feed) return;
+
+  const { data: posts, error } = await sb.from('posts').select('*').order('created_at', { ascending: false });
+  if (error) {
+    feed.innerHTML = `<div class="empty">Eserler yüklenemedi.<br><span class="small">${esc(error.message)}</span></div>`;
+    return;
+  }
+  cachedPosts = posts || [];
+
+  const ids = [...new Set(cachedPosts.map(p => p.author_id).filter(Boolean))];
+  let profiles = [];
+  if (ids.length) {
+    const result = await sb.from('profiles').select('id,username,display_name').in('id', ids);
+    profiles = result.data || [];
+  }
+  const profileMap = Object.fromEntries(profiles.map(p => [p.id, p]));
+
+  const postIds = cachedPosts.map(p => p.id);
+  let likesData = [];
+  if (postIds.length) {
+    const likesResult = await sb.from('likes').select('post_id').in('post_id', postIds);
+    likesData = likesResult.data || [];
+  }
+  const likeCount = {};
+  likesData.forEach(l => { likeCount[l.post_id] = (likeCount[l.post_id] || 0) + 1; });
+
+  let filtered = cachedPosts;
+  if (feedSearch) {
+    filtered = cachedPosts.filter(p =>
+      (p.title || '').toLowerCase().includes(feedSearch) ||
+      (p.description || '').toLowerCase().includes(feedSearch)
+    );
+  }
+
+  if (feedSort === 'liked') {
+    filtered = [...filtered].sort((a, b) => (likeCount[b.id] || 0) - (likeCount[a.id] || 0));
+  }
+
+  if (!filtered.length) {
+    feed.innerHTML = feedSearch
+      ? `<div class="empty">"${esc(feedSearch)}" için sonuç bulunamadı.</div>`
+      : `<div class="empty">Henüz burada bir eser yok.<br>İlk hikâyeyi sen başlatabilirsin.</div>`;
+    return;
+  }
+
+  feed.innerHTML = filtered.map(post => {
+    const profile = profileMap[post.author_id];
+    const title = post.title || 'Başlıksız eser';
+    const author = displayName(profile);
+    const likes = likeCount[post.id] || 0;
+    return `
+      <article class="card">
+        <div class="meta">
+          <span class="pill">${esc(post.category || 'Diğer')}</span>
+          <span>${esc(post.kind === 'poem' ? 'Şiir' : post.kind === 'short' ? 'Kısa hikâye' : 'Eser')}</span>
+          <span>· ${esc(formatDate(post.created_at))}</span>
+        </div>
+        <h3><a href="#/read/${encodeURIComponent(post.id)}">${esc(title)}</a></h3>
+        <p>${esc(post.description || 'Bu eser için henüz bir açıklama eklenmemiş.')}</p>
+        <div class="meta">Yazar: <a href="#/user/${encodeURIComponent(post.author_id)}">${esc(author)}</a></div>
+        <div class="post-actions">
+          <button class="like-btn" data-post-id="${esc(post.id)}"><span class="heart">🤍</span> <span class="like-count">${likes}</span></button>
+          <a class="comment-toggle" href="#/read/${encodeURIComponent(post.id)}">💬 Yorumlar</a>
+        </div>
+      </article>`;
+  }).join('');
+
+  feed.querySelectorAll('.like-btn').forEach(btn => {
+    btn.addEventListener('click', () => handleLike(btn));
+  });
+}
+
+async function handleLike(btn) {
+  if (!currentUser) { location.hash = '#/auth?signup'; return; }
+  const postId = btn.dataset.postId;
+  const isLiked = btn.classList.contains('liked');
+  btn.disabled = true;
+
+  if (isLiked) {
+    const { error } = await sb.from('likes').delete().eq('post_id', postId).eq('user_id', currentUser.id);
+    if (error) { btn.disabled = false; return alert(error.message); }
+  } else {
+    const { error } = await sb.from('likes').insert({ post_id: postId, user_id: currentUser.id });
+    if (error) { btn.disabled = false; return alert(error.message); }
+  }
+  btn.disabled = false;
+  loadFeed();
+}
+
+function renderAuth(mode = 'signup') {  currentAuthMode = mode;
+  const signup = mode === 'signup';
+  app.innerHTML = `
+    <section class="card form-card">
+      <div class="eyebrow">Halka'ya hoş geldin</div>
+      <h1 style="font-size:36px">${signup ? 'Aramıza katıl.' : 'Tekrar hoş geldin.'}</h1>
+      <p class="subtitle">${signup ? 'Hesabını oluştur ve hikâyeni paylaşmaya başla.' : 'Hesabına giriş yap, kaldığın yerden devam et.'}</p>
+      <form id="authForm">
+        ${signup ? `
+          <div class="field">
+            <label for="display_name">Görünen ad</label>
+            <input id="display_name" name="display_name" required maxlength="60" autocomplete="name" placeholder="Örn. Adın Soyadın">
+            <div class="small">Profilinde ve eserlerinin yanında görünecek ad.</div>
+          </div>
+          <div class="field">
+            <label for="username">Kullanıcı adı</label>
+            <input id="username" name="username" required minlength="3" maxlength="20" pattern="[a-z0-9_]{3,20}" title="3-20 karakter: küçük harf, rakam ve alt çizgi" autocomplete="username" autocapitalize="none" placeholder="ornek_kullanici">
+            <div class="small">Küçük harf, rakam ve alt çizgi kullan.</div>
+          </div>
+        ` : ''}
+        <div class="field">
+          <label for="email">E-posta</label>
+          <input id="email" name="email" type="email" required autocomplete="email" placeholder="ornek@eposta.com">
+        </div>
+        <div class="field">
+          <label for="password">Şifre</label>
+          <input id="password" name="password" type="password" required minlength="6" autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="En az 6 karakter">
+        </div>
+        <button class="btn primary" style="width:100%" type="submit">${signup ? 'Hesap oluştur' : 'Giriş yap'}</button>
+      </form>
+      <div id="message" class="message"></div>
+      <hr>
+      <p class="small">${signup ? 'Zaten hesabın var mı?' : 'Henüz hesabın yok mu?'}
+        <a href="#/auth?${signup ? 'login' : 'signup'}">${signup ? 'Giriş yap' : 'Hesap oluştur'}</a>
+      </p>
+    </section>
+  `;
+
+  document.getElementById('authForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const email = String(form.get('email') || '').trim();
+    const password = String(form.get('password') || '');
+    const submit = e.currentTarget.querySelector('button[type="submit"]');
+    submit.disabled = true;
+    submit.textContent = 'İşleniyor…';
+
+    try {
+      if (signup) {
+        const username = String(form.get('username') || '').trim().toLowerCase();
+        const name = String(form.get('display_name') || '').trim();
+        if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+          showMessage('Kullanıcı adı 3–20 karakter olmalı; küçük harf, rakam ve alt çizgi kullan.', true);
+          return;
+        }
+        if (!name) { showMessage('Lütfen bir görünen ad yaz.', true); return; }
+        const { data, error } = await sb.auth.signUp({
+          email, password,
+          options: { data: { username, display_name: name } }
+        });
+        if (error) { showMessage(error.message, true); return; }
+        if (!data.session) {
+          showMessage('Hesabın oluşturuldu. E-posta doğrulaması isteniyorsa gelen kutunu kontrol et. Görünen adın kayıt sırasında kaydedildi.');
+          return;
+        }
+        currentUser = data.user;
+        await loadProfile();
+        location.hash = '#/';
+      } else {
+        const { data, error } = await sb.auth.signInWithPassword({ email, password });
+        if (error) { showMessage(error.message, true); return; }
+        currentUser = data.user;
+        await loadProfile();
+        location.hash = '#/';
+      }
+    } catch (err) {
+      showMessage(err.message || 'Beklenmeyen bir hata oluştu.', true);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = signup ? 'Hesap oluştur' : 'Giriş yap';
+    }
+  });
+}
+
+async function loadProfile() {
+  if (!currentUser) { currentProfile = null; return; }
+  const { data, error } = await sb.from('profiles').select('*').eq('id', currentUser.id).maybeSingle();
+  if (error) console.error('Profil yükleme hatası:', error.message);
+  currentProfile = data || null;
+}
+
+function renderWrite() {
+  if (!currentUser) { location.hash = '#/auth?signup'; return; }
+  app.innerHTML = `
+    <section class="hero">
+      <div class="eyebrow">Yaratıcılığa yer aç</div>
+      <h1>Yeni eserin.</h1>
+      <p class="subtitle">Eserinin bilgilerini ekle. İstersen ilk bölümünü de aynı anda yaz.</p>
+    </section>
+    <section class="card">
+      <form id="writeForm">
+        <div class="field">
+          <label for="title">Eserin adı</label>
+          <input id="title" name="title" required maxlength="120" placeholder="Hikâyenin adı">
+        </div>
+        <div class="field">
+          <label for="category">Kategori</label>
+          <select id="category" name="category">${categoryOptions()}</select>
+        </div>
+        <div class="field">
+          <label for="kind">Eser türü</label>
+          <select id="kind" name="kind">
+            <option value="story">Hikâye / Roman</option>
+            <option value="short">Kısa hikâye</option>
+            <option value="poem">Şiir</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="description">Kısa açıklama</label>
+          <textarea id="description" name="description" maxlength="1200" placeholder="Eserini birkaç cümleyle tanıt…"></textarea>
+        </div>
+        <hr>
+        <h2>İlk bölüm (isteğe bağlı)</h2>
+        <div class="field">
+          <label for="chapter_title">Bölüm başlığı</label>
+          <input id="chapter_title" name="chapter_title" maxlength="120" placeholder="Örn. Birinci Bölüm">
+        </div>
+        <div class="field">
+          <label for="chapter_body">Bölüm metni</label>
+          <textarea id="chapter_body" name="chapter_body" placeholder="Hikâyeni buraya yaz…"></textarea>
+        </div>
+        <button class="btn primary" type="submit">Eseri yayımla</button>
+      </form>
+      <div id="message" class="message"></div>
+    </section>
+  `;
+
+  document.getElementById('writeForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = new FormData(e.currentTarget);
+    const title = String(form.get('title') || '').trim();
+    const description = String(form.get('description') || '').trim();
+    const chapterTitle = String(form.get('chapter_title') || '').trim();
+    const chapterBody = String(form.get('chapter_body') || '').trim();
+    const submit = e.currentTarget.querySelector('button[type="submit"]');
+    if (!title) { showMessage('Lütfen eserine bir ad ver.', true); return; }
+    submit.disabled = true;
+    submit.textContent = 'Yayımlanıyor…';
+    try {
+      const { data: post, error } = await sb.from('posts').insert({
+        author_id: currentUser.id,
+        title,
+        category: String(form.get('category') || 'Diğer'),
+        kind: String(form.get('kind') || 'story'),
+        description
+      }).select().single();
+      if (error) { showMessage('Eser oluşturulamadı: ' + error.message, true); return; }
+      if (chapterBody) {
+        const { error: chapterError } = await sb.from('chapters').insert({
+          post_id: post.id, position: 1,
+          title: chapterTitle || 'Birinci Bölüm',
+          body: chapterBody
+        });
+        if (chapterError) {
+          showMessage('Eser oluşturuldu ancak ilk bölüm kaydedilemedi: ' + chapterError.message, true);
+          return;
+        }
+      }
+      location.hash = '#/read/' + encodeURIComponent(post.id);
+    } catch (err) {
+      showMessage(err.message || 'Bir hata oluştu.', true);
+    } finally {
+      submit.disabled = false;
+      submit.textContent = 'Eseri yayımla';
+    }
+  });
+}
+
+async function renderRead(id) {
+  app.innerHTML = `<div class="loading"><div class="spinner-container"><div class="spinner-rings"></div><span>Eser açılıyor…</span></div></div>`;
+
+  const { data: post, error } = await sb.from('posts').select('*').eq('id', id).maybeSingle();
+  if (error || !post) {
+    app.innerHTML = '<div class="empty">Bu eser bulunamadı veya görüntülenemiyor.</div>';
+    return;
+  }
+
+  const { data: chapters, error: chapterError } = await sb.from('chapters').select('*').eq('post_id', id).order('position', { ascending: true });
+  const { data: profile } = await sb.from('profiles').select('id,username,display_name').eq('id', post.author_id).maybeSingle();
+
+  const likesResult = await sb.from('likes').select('user_id').eq('post_id', id);
+  const likes = likesResult.data || [];
+  const likeCount = likes.length;
+  const userLiked = !!currentUser && likes.some(l => l.user_id === currentUser.id);
+
+  const commentsResult = await sb.from('comments').select('*').eq('post_id', id).order('created_at', { ascending: true });
+  const comments = commentsResult.data || [];
+  const commentAuthorIds = [...new Set(comments.map(c => c.author_id).filter(Boolean))];
+  let commentProfiles = [];
+  if (commentAuthorIds.length) {
+    const pr = await sb.from('profiles').select('id,username,display_name').in('id', commentAuthorIds);
+    commentProfiles = pr.data || [];
+  }
+  const commentProfileMap = Object.fromEntries(commentProfiles.map(p => [p.id, p]));
+
+  const isOwner = !!currentUser && currentUser.id === post.author_id;
+
+  app.innerHTML = `
+    <p><a href="#/">← Eserlere dön</a></p>
+    <section class="hero">
+      <div class="eyebrow">${esc(post.category || 'Diğer')} · ${esc(post.kind === 'poem' ? 'Şiir' : post.kind === 'short' ? 'Kısa hikâye' : 'Eser')}</div>
+      <h1>${esc(post.title || 'Başlıksız eser')}</h1>
+      <p class="subtitle">${esc(post.description || '')}</p>
+      <div class="meta">
+        <span>Yazar: <a href="#/user/${encodeURIComponent(post.author_id)}">${esc(displayName(profile))}</a></span>
+        <span>· ${esc(formatDate(post.created_at))}</span>
+      </div>
+    </section>
+    ${mediaHTML(post)}
+    <div class="post-actions">
+      <button class="like-btn ${userLiked ? 'liked' : ''}" id="readLikeBtn">
+        <span class="heart">${userLiked ? '❤️' : '🤍'}</span>
+        <span class="like-count">${likeCount}</span>
+      </button>
+    </div>
+    ${chapterError ? `<div class="empty">Bölümler yüklenemedi.<br><span class="small">${esc(chapterError.message)}</span></div>` : ''}
+    ${(chapters || []).map(ch => `
+      <section class="chapter">
+        <h3>${esc(ch.title || 'Bölüm')}</h3>
+        <div class="chapter-body">${esc(ch.body || '')}</div>
+      </section>`).join('')}
+    ${(!chapterError && !post.media_url && !(chapters || []).length) ? '<div class="empty">Bu esere henüz bölüm eklenmemiş.</div>' : ''}
+
+    <section class="comments-section">
+      <h3 style="font-family:'Fredoka',sans-serif;margin-bottom:14px">💬 Yorumlar (${comments.length})</h3>
+      <div id="commentsList">
+        ${comments.length ? comments.map(c => {
+          const cp = commentProfileMap[c.author_id];
+          const canDelete = currentUser && (currentUser.id === c.author_id || isOwner);
+          return `
+            <div class="comment">
+              <div class="comment-head">
+                <span class="comment-author">${esc(displayName(cp, 'Anonim'))}</span>
+                <span>
+                  <span class="comment-date">${esc(formatDate(c.created_at))}</span>
+                  ${canDelete ? `<button class="comment-del" data-comment-id="${esc(c.id)}" type="button">Sil</button>` : ''}
+                </span>
+              </div>
+              <div class="comment-body">${esc(c.body)}</div>
+            </div>`;
+        }).join('') : '<div class="empty">Henüz yorum yok. İlk yorumu sen yap!</div>'}
+      </div>
+      ${currentUser ? `
+        <form class="comment-form" id="commentForm">
+          <textarea id="commentBody" placeholder="Yorumunu yaz…" required maxlength="1000"></textarea>
+          <button class="btn primary" type="submit">Yorumu gönder</button>
+        </form>
+      ` : `
+        <div class="empty">Yorum yapmak için <a href="#/auth?signup">giriş yap</a>.</div>
+      `}
+    </section>
+
+    ${isOwner ? `
+      <hr>
+      <section class="card">
+        <h3>Yeni bölüm ekle</h3>
+        <form id="chapterForm">
+          <div class="field">
+            <label for="ctitle">Bölüm başlığı</label>
+            <input id="ctitle" name="ctitle" required maxlength="120">
+          </div>
+          <div class="field">
+            <label for="cbody">Metin</label>
+            <textarea id="cbody" name="cbody" required></textarea>
+          </div>
+          <button class="btn primary" type="submit">Bölümü ekle</button>
+          <div id="message" class="message"></div>
+        </form>
+      </section>
+      <p><button class="btn danger" id="deleteBtn" type="button">Eseri sil</button></p>` : ''}
+  `;
+
+  document.getElementById('readLikeBtn')?.addEventListener('click', async () => {
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    if (userLiked) {
+      await sb.from('likes').delete().eq('post_id', id).eq('user_id', currentUser.id);
+    } else {
+      await sb.from('likes').insert({ post_id: id, user_id: currentUser.id });
+    }
+    renderRead(id);
+  });
+
+  document.getElementById('commentForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = document.getElementById('commentBody').value.trim();
+    if (!body) return;
+    const { error: cErr } = await sb.from('comments').insert({
+      post_id: id, author_id: currentUser.id, body
+    });
+    if (cErr) { alert('Yorum eklenemedi: ' + cErr.message); return; }
+    renderRead(id);
+  });
+
+  document.querySelectorAll('.comment-del').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      if (!confirm('Bu yorumu silmek istediğinden emin misin?')) return;
+      const cid = btn.dataset.commentId;
+      await sb.from('comments').delete().eq('id', cid);
+      renderRead(id);
+    });
+  });
+
+  if (!isOwner) return;
+
+  document.getElementById('chapterForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = new FormData(e.target);
+    const last = (chapters || []).reduce((m, c) => Math.max(m, c.position || 0), 0);
+    const { error: insertError } = await sb.from('chapters').insert({
+      post_id: post.id, position: last + 1,
+      title: String(form.get('ctitle') || '').trim(),
+      body: String(form.get('cbody') || '').trim()
+    });
+    if (insertError) return showMessage('Bölüm eklenemedi: ' + insertError.message, true);
+    renderRead(id);
+  });
+
+  document.getElementById('deleteBtn').addEventListener('click', async () => {
+    if (!confirm('Bu eser ve tüm bölümleri silinsin mi?')) return;
+    await sb.from('chapters').delete().eq('post_id', post.id);
+    const { error: deleteError } = await sb.from('posts').delete().eq('id', post.id);
+    if (deleteError) return alert('Eser silinemedi: ' + deleteError.message);
+    location.hash = '#/';
+  });
+}
+
+async function renderProfile(id) {
+  const userId = id === 'me' ? currentUser?.id : id;
+  if (!userId) { location.hash = '#/auth'; return; }
+
+  app.innerHTML = `<div class="loading"><div class="spinner-container"><div class="spinner-rings"></div><span>Profil açılıyor…</span></div></div>`;
+
+  const { data: profile } = await sb.from('profiles').select('*').eq('id', userId).maybeSingle();
+  if (!profile) { app.innerHTML = '<div class="empty">Bu profil bulunamadı.</div>'; return; }
+
+  const { data: posts, error } = await sb.from('posts').select('*').eq('author_id', userId).order('created_at', { ascending: false });
+
+  const name = displayName(profile);
+  app.innerHTML = `
+    <section class="profile-head">
+      <div class="avatar">${initials(name)}</div>
+      <div>
+        <h1>${esc(name)}</h1>
+        <div class="meta">@${esc(profile.username || '')}</div>
+      </div>
+    </section>
+    <div class="section-head"><h2>Eserleri</h2></div>
+    ${error ? `<div class="empty">Eserler yüklenemedi.<br><span class="small">${esc(error.message)}</span></div>`
+      : !(posts || []).length ? '<div class="empty">Henüz bir eser paylaşılmamış.</div>'
+      : posts.map(post => `
+      <article class="card">
+        <div class="meta">
+          <span class="pill">${esc(post.category || 'Diğer')}</span>
+          <span>${esc(post.kind === 'poem' ? 'Şiir' : post.kind === 'short' ? 'Kısa hikâye' : 'Eser')}</span>
+          <span>· ${esc(formatDate(post.created_at))}</span>
+        </div>
+        <h3><a href="#/read/${encodeURIComponent(post.id)}">${esc(post.title || 'Başlıksız eser')}</a></h3>
+        <p>${esc(post.description || '')}</p>
+      </article>`).join('')}
+  `;
+}
+
+const SECTIONS = {
+  yazilar: { label: 'Yazılar', type: 'writing', groups: [
+    { title: 'Tür', param: 'kind', items: [['Hikâye / Roman', 'story'], ['Kısa hikâye', 'short'], ['Şiir', 'poem']] },
+    { title: 'Kategori', param: 'cat', items: categories.filter(c => c !== 'Diğer').map(c => [c, c]) }
+  ]},
+  cizimler: { label: 'Çizimler', type: 'drawing', groups: [
+    { title: 'Tür', param: 'cat', items: ['Karakalem', 'Dijital çizim', 'Karakter tasarımı', 'Manga ve çizgi roman', 'Karikatür', 'Suluboya'].map(x => [x, x]) }
+  ]},
+  fotograflar: { label: 'Fotoğraflar', type: 'photo', groups: [
+    { title: 'Tür', param: 'cat', items: ['Doğa', 'Portre', 'Sokak', 'Şehir', 'Siyah beyaz', 'Makro'].map(x => [x, x]) }
+  ]},
+  videolar: { label: 'Videolar', type: 'video', groups: [
+    { title: 'Tür', param: 'cat', items: ['Kısa film', 'Animasyon', 'Vlog', 'Müzik', 'Eğitim', 'Komedi'].map(x => [x, x]) }
+  ]},
+  kesfet: { label: 'Keşfet', type: null, groups: [
+    { title: 'Keşfet', param: 'sub', items: [['Yazarlar', 'yazarlar'], ['Rastgele bir eser', 'rastgele']] }
+  ]}
+};
+
+const CREATE_MENU = [
+  { label: 'Yazı', items: [['Hikâye / Roman', '#/write?kind=story'], ['Kısa hikâye', '#/write?kind=short'], ['Şiir', '#/write?kind=poem']] },
+  { label: 'Çizim', items: [['Tuvalde çiz', '#/create/drawing?mode=canvas'], ['Dosya yükle', '#/create/drawing?mode=file']] },
+  { label: 'Fotoğraf', items: [['Kamerayla çek', '#/create/photo?mode=camera'], ['Galeriden seç', '#/create/photo?mode=file']] },
+  { label: 'Video', items: [['Kamerayla kaydet', '#/create/video?mode=camera'], ['Dosya yükle', '#/create/video?mode=file']] }
+];
+
+const secLink = (key, param, val) => `#/section/${key}${param ? `?${param}=${encodeURIComponent(val)}` : ''}`;
+const loadingBlock = text => `<div class="loading"><div class="spinner-container"><div class="spinner-rings"></div><span>${text}</span></div></div>`;
+
+function renderTabs() {
+  const el = document.getElementById('tabs');
+  if (!el) return;
+  const { parts } = parseRoute();
+  const activeKey = parts[0] === 'section' ? parts[1] : '';
+  el.innerHTML = Object.entries(SECTIONS).map(([key, s]) => `
+    <div class="dd">
+      <button class="tab ${key === activeKey ? 'on' : ''}" type="button" data-menu="${key}" aria-haspopup="true" aria-expanded="false">${esc(s.label)} <span class="caret">▾</span></button>
+      <div class="dd-panel" id="menu-${key}" hidden>
+        <a href="${secLink(key)}">Tümü</a>
+        ${s.groups.map(g => `<div class="grp">${esc(g.title)}</div>${g.items.map(([label, val]) => `<a href="${secLink(key, g.param, val)}">${esc(label)}</a>`).join('')}`).join('')}
+      </div>
+    </div>`).join('');
+}
+
+function plusMenuHTML() {
+  return `
+    <div class="dd">
+      <button class="plus" type="button" data-menu="plus" aria-label="Yeni paylaşım" aria-haspopup="true" aria-expanded="false">+</button>
+      <div class="dd-panel right" id="menu-plus" hidden>
+        <div class="grp">Ne paylaşmak istersin?</div>
+        ${CREATE_MENU.map(o => `
+          <button class="acc" type="button" data-acc="1">${esc(o.label)} <span>▸</span></button>
+          <div class="acc-body" hidden>${o.items.map(([l, h]) => `<a href="${h}">${esc(l)}</a>`).join('')}</div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function closeMenus() {
+  document.querySelectorAll('.dd-panel').forEach(p => { p.hidden = true; });
+  document.querySelectorAll('[data-menu]').forEach(b => b.setAttribute('aria-expanded', 'false'));
+}
+document.addEventListener('click', e => {
+  const acc = e.target.closest('[data-acc]');
+  if (acc) {
+    const body = acc.nextElementSibling;
+    const open = body.hidden;
+    const panel = acc.parentElement;
+    panel.querySelectorAll('.acc-body').forEach(b => { b.hidden = true; });
+    panel.querySelectorAll('.acc span').forEach(sp => { sp.textContent = '▸'; });
+    body.hidden = !open;
+    acc.querySelector('span').textContent = open ? '▾' : '▸';
+    return;
+  }
+  const btn = e.target.closest('[data-menu]');
+  if (btn) {
+    const panel = document.getElementById('menu-' + btn.dataset.menu);
+    const wasHidden = panel.hidden;
+    closeMenus();
+    panel.hidden = !wasHidden;
+    btn.setAttribute('aria-expanded', String(wasHidden));
+    return;
+  }
+  closeMenus();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
+
+function mediaHTML(post) {
+  if (!post.media_url || !/^https?:\/\//.test(post.media_url)) return '';
+  const url = esc(post.media_url);
+  return post.type === 'video'
+    ? `<video class="media" src="${url}" controls preload="metadata"></video>`
+    : `<img class="media" src="${url}" alt="${esc(post.title || '')}" loading="lazy">`;
+}
+
+function postCard(post, profileMap = {}) {
+  const writing = !post.type || post.type === 'writing';
+  const kind = post.kind === 'poem' ? 'Şiir' : post.kind === 'short' ? 'Kısa hikâye' : 'Eser';
+  return `
+    <article class="card">
+      <div class="meta">
+        <span class="pill">${esc(post.category || 'Diğer')}</span>
+        ${writing ? `<span>${kind}</span>` : ''}
+        <span>· ${esc(formatDate(post.created_at))}</span>
+      </div>
+      ${mediaHTML(post)}
+      <h3><a href="#/read/${encodeURIComponent(post.id)}">${esc(post.title || 'Başlıksız eser')}</a></h3>
+      <p>${esc(post.description || '')}</p>
+      <div class="meta">${writing ? 'Yazar' : 'Paylaşan'}: <a href="#/user/${encodeURIComponent(post.author_id)}">${esc(displayName(profileMap[post.author_id]))}</a></div>
+    </article>`;
+}
+
+async function renderSection(key, query) {
+  const s = SECTIONS[key];
+  if (!s) return renderHome();
+  const params = new URLSearchParams(query);
+  if (key === 'kesfet' && params.get('sub') === 'yazarlar') return renderAuthors();
+  if (key === 'kesfet' && params.get('sub') === 'rastgele') return openRandom();
+
+  const myHash = location.hash;
+  let activeLabel = '';
+  const chips = s.groups.flatMap(g => g.items.map(([label, val]) => {
+    const on = params.get(g.param) === val;
+    if (on) activeLabel = label;
+    return `<a class="chip ${on ? 'on' : ''}" href="${secLink(key, g.param, val)}">${esc(label)}</a>`;
+  }));
+  app.innerHTML = `
+    <section class="hero" style="padding-bottom:8px">
+      <div class="eyebrow">Halka</div>
+      <h1>${esc(s.label)}${activeLabel ? ' · ' + esc(activeLabel) : ''}</h1>
+    </section>
+    <div class="chips"><a class="chip ${activeLabel ? '' : 'on'}" href="${secLink(key)}">Tümü</a>${chips.join('')}</div>
+    <div id="sectionFeed">${loadingBlock('Yükleniyor…')}</div>`;
+
+  let q = sb.from('posts').select('*').order('created_at', { ascending: false }).limit(60);
+  if (s.type && s.type !== 'writing') q = q.eq('type', s.type);
+  if (params.get('kind')) q = q.eq('kind', params.get('kind'));
+  if (params.get('cat')) q = q.eq('category', params.get('cat'));
+  const { data, error } = await q;
+  if (location.hash !== myHash) return;
+  const box = document.getElementById('sectionFeed');
+  if (!box) return;
+
+  if (error) {
+    const soon = s.type && s.type !== 'writing';
+    box.innerHTML = `<div class="empty">${soon ? 'Bu bölüm çok yakında açılıyor.' : 'Eserler yüklenemedi.'}<br><span class="small">${esc(error.message)}</span></div>`;
+    return;
+  }
+  let posts = data || [];
+  if (s.type === 'writing') posts = posts.filter(p => !p.type || p.type === 'writing');
+  if (!posts.length) {
+    box.innerHTML = '<div class="empty">Burada henüz bir paylaşım yok.<br>İlkini sen yapabilirsin: sağ üstteki + düğmesine dokun.</div>';
+    return;
+  }
+  const ids = [...new Set(posts.map(p => p.author_id).filter(Boolean))];
+  const pr = ids.length ? (await sb.from('profiles').select('id,username,display_name').in('id', ids)).data || [] : [];
+  if (location.hash !== myHash) return;
+  const map = Object.fromEntries(pr.map(x => [x.id, x]));
+  box.innerHTML = posts.map(p => postCard(p, map)).join('');
+}
+
+async function renderAuthors() {
+  const myHash = location.hash;
+  app.innerHTML = `
+    <section class="hero" style="padding-bottom:8px"><div class="eyebrow">Keşfet</div><h1>Yazarlar</h1></section>
+    <div id="authors">${loadingBlock('Yazarlar yükleniyor…')}</div>`;
+  const { data, error } = await sb.from('profiles').select('id,username,display_name').limit(60);
+  if (location.hash !== myHash) return;
+  const box = document.getElementById('authors');
+  if (!box) return;
+  if (error) { box.innerHTML = `<div class="empty">Yazarlar yüklenemedi.<br><span class="small">${esc(error.message)}</span></div>`; return; }
+  if (!(data || []).length) { box.innerHTML = '<div class="empty">Henüz kimse katılmamış.</div>'; return; }
+  box.innerHTML = data.map(p => `
+    <a class="card" href="#/user/${encodeURIComponent(p.id)}" style="display:flex;gap:14px;align-items:center">
+      <div class="avatar">${initials(displayName(p))}</div>
+      <div><h3 style="margin:0">${esc(displayName(p))}</h3><div class="meta">@${esc(p.username || '')}</div></div>
+    </a>`).join('');
+}
+
+async function openRandom() {
+  app.innerHTML = loadingBlock('Bir eser seçiliyor…');
+  const { data } = await sb.from('posts').select('id').limit(200);
+  if (!data || !data.length) { app.innerHTML = '<div class="empty">Henüz açılacak bir eser yok.</div>'; return; }
+  location.hash = '#/read/' + encodeURIComponent(data[Math.floor(Math.random() * data.length)].id);
+}
+
+function renderCreate(type, mode) {
+  if (!currentUser) { location.hash = '#/auth?signup'; return; }
+  const info = {
+    drawing: { title: 'Çizim paylaş', modes: { canvas: 'Tuvalde çiz', file: 'Dosya yükle' } },
+    photo: { title: 'Fotoğraf paylaş', modes: { camera: 'Kamerayla çek', file: 'Galeriden seç' } },
+    video: { title: 'Video paylaş', modes: { camera: 'Kamerayla kaydet', file: 'Dosya yükle' } }
+  }[type];
+  if (!info) { location.hash = '#/'; return; }
+  app.innerHTML = `
+    <section class="card form-card">
+      <div class="eyebrow">${esc(info.title)}</div>
+      <h1 style="font-size:32px">${esc(info.modes[mode] || Object.values(info.modes)[0])}</h1>
+      <p class="subtitle">Bu ekran bir sonraki güncellemede açılacak. Şimdilik yazı paylaşabilirsin.</p>
+      <p><a class="btn primary" href="#/write">Yazı paylaş</a> <a class="btn ghost" href="#/">Ana sayfa</a></p>
+    </section>`;
+}
+
+function parseRoute() {
+  const raw = location.hash.replace(/^#/, '') || '/';
+  const [path, query = ''] = raw.split('?');
+  return { parts: path.split('/').filter(Boolean), query };
+}
+
+async function route() {
+  const { parts, query } = parseRoute();
+  const [view, arg] = parts;
+  window.scrollTo(0, 0);
+  setNav();
+  if (!view) return renderHome();
+  if (view === 'auth') return renderAuth(query === 'signup' ? 'signup' : 'login');
+  if (view === 'write') {
+    renderWrite();
+    const k = new URLSearchParams(query).get('kind');
+    const sel = document.getElementById('kind');
+    if (sel && k && [...sel.options].some(o => o.value === k)) sel.value = k;
+    return;
+  }
+  if (view === 'section') return renderSection(arg, query);
+  if (view === 'create') return renderCreate(arg, new URLSearchParams(query).get('mode'));
+  if (view === 'read') return renderRead(decodeURIComponent(arg || ''));
+  if (view === 'profile') return renderProfile('me');
+  if (view === 'user') return renderProfile(decodeURIComponent(arg || ''));
+  return renderHome();
+}
+
+async function init() {
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+  const { data } = await sb.auth.getSession();
+  currentUser = data.session?.user ?? null;
+  await loadProfile();
+  sb.auth.onAuthStateChange((_event, session) => {
+    currentUser = session?.user ?? null;
+    setTimeout(async () => { await loadProfile(); setNav(); }, 0);
+  });
+  window.addEventListener('hashchange', route);
+  route();
+}
+
+init().catch(err => {
+  app.innerHTML = `<div class="empty">Halka başlatılamadı.<br><span class="small">${esc(err.message)}</span></div>`;
+});
+</script>
+</body>
+</html>
