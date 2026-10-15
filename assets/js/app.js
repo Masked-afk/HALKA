@@ -421,6 +421,7 @@ function renderHome() {
     </section>
     <div id="continueReadingHome"></div>
     <div id="streakHome"></div>
+    <div id="themeHome"></div>
     <div id="storyBar"></div>
     <section class="top-posts-shell">
       <div class="section-head"><div><div class="eyebrow">Öne çıkanlar</div><h2>En çok konuşulan eserler</h2></div>
@@ -485,6 +486,29 @@ function renderHome() {
   loadContinueReading();
   loadStories();
   loadStreakCard();
+  loadThemeCard();
+}
+
+async function loadThemeCard() {
+  const box = document.getElementById('themeHome');
+  if (!box) return;
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await sb.from('weekly_themes').select('*')
+    .eq('active', true).lte('starts_on', today).gte('ends_on', today)
+    .order('starts_on', { ascending: false }).limit(1).maybeSingle();
+  if (!data) { box.innerHTML = ''; return; }
+  const { count } = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('theme_id', data.id);
+  box.innerHTML = `
+    <div class="card theme-card">
+      <div class="eyebrow">🎨 Bu haftanın teması</div>
+      <h3 style="margin:6px 0">${esc(data.title)}</h3>
+      ${data.prompt ? `<p class="small" style="margin:0 0 8px">${esc(data.prompt)}</p>` : ''}
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span class="small">${count || 0} eser katıldı</span>
+        ${currentUser ? `<a class="btn small" href="#/write?kind=blog&theme=${encodeURIComponent(data.id)}">Temayla yaz</a>` : ''}
+        <a class="btn ghost small" href="#/section/kesfet?theme=${encodeURIComponent(data.id)}">Katılanları gör</a>
+      </div>
+    </div>`;
 }
 
 async function loadStreakCard() {
@@ -1055,7 +1079,66 @@ async function renderOzet() {
       }).join('')}</div>
     </section>` : ''}
     ${!posts.length ? '<div class="empty">Bu yıl henüz eser paylaşmadın. İlk eserini yayınla, özetin dolsun! 🌸</div>' : ''}
-    <div style="text-align:center;margin-top:8px"><a class="btn ghost" href="#/profile">Profilime dön</a></div>`;
+    <div style="text-align:center;margin-top:8px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+      <button class="btn" id="ozetShareBtn" type="button">🖼️ Kartı görsel olarak indir</button>
+      <a class="btn ghost" href="#/profile">Profilime dön</a>
+    </div>
+    <div id="ozetShareMsg" class="message" style="text-align:center" aria-live="polite"></div>`;
+
+  document.getElementById('ozetShareBtn')?.addEventListener('click', () => {
+    const btn = document.getElementById('ozetShareBtn');
+    btn.disabled = true;
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = 800; canvas.height = 1000;
+      const ctx = canvas.getContext('2d');
+      const grad = ctx.createLinearGradient(0, 0, 800, 1000);
+      grad.addColorStop(0, '#1a1816'); grad.addColorStop(1, '#2b2418');
+      ctx.fillStyle = grad; ctx.fillRect(0, 0, 800, 1000);
+      ctx.strokeStyle = '#E8923C'; ctx.lineWidth = 3;
+      ctx.strokeRect(24, 24, 752, 952);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#E8923C'; ctx.font = 'bold 30px Georgia, serif';
+      ctx.fillText(`${year} HALKA ÖZETİ`, 400, 90);
+      ctx.fillStyle = '#f4efe1'; ctx.font = 'bold 46px Georgia, serif';
+      ctx.fillText((currentProfile?.display_name || currentUser.user_metadata?.display_name || 'Halka üyesi').slice(0, 30), 400, 155);
+      const rows = [
+        ['📤', posts.length, 'eser yayınladı'],
+        ['👀', totalViews, 'kez görüntülendi'],
+        ['❤️', likeCount, 'beğeni aldı'],
+        ['💬', commentCount, 'yorum yaptı'],
+        ['🏅', badgeCount, 'rozet kazandı'],
+        ['🤝', followerCount, 'takipçisi oldu']
+      ];
+      rows.forEach(([icon, num, label], i) => {
+        const col = i % 2, row = Math.floor(i / 2);
+        const x = 200 + col * 400, y = 260 + row * 150;
+        ctx.font = '46px serif'; ctx.fillText(icon, x, y);
+        ctx.fillStyle = '#f4efe1'; ctx.font = 'bold 52px Georgia, serif'; ctx.fillText(String(num), x, y + 62);
+        ctx.fillStyle = '#9a9484'; ctx.font = '20px Inter, sans-serif'; ctx.fillText(label, x, y + 95);
+        ctx.fillStyle = '#f4efe1';
+      });
+      if (topPost) {
+        ctx.fillStyle = '#9a9484'; ctx.font = '20px Georgia, serif';
+        ctx.fillText('Yılın eseri:', 400, 760);
+        ctx.fillStyle = '#f4efe1'; ctx.font = 'bold 30px Georgia, serif';
+        ctx.fillText((topPost.title || 'Başlıksız eser').slice(0, 40), 400, 800);
+      }
+      ctx.strokeStyle = '#E8923C'; ctx.beginPath(); ctx.arc(400, 890, 26, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = '#9a9484'; ctx.font = '18px Inter, sans-serif';
+      ctx.fillText('halka-sosyal.web.app', 400, 960);
+      canvas.toBlob(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `halka-ozeti-${year}.png`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      }, 'image/png');
+    } catch (err) {
+      const msg = document.getElementById('ozetShareMsg');
+      if (msg) { msg.textContent = 'Kart oluşturulamadı: ' + err.message; msg.className = 'message error'; }
+    } finally { btn.disabled = false; }
+  });
 }
 
 async function renderRelayList() {
@@ -1536,7 +1619,8 @@ function renderWrite() {
         kind,
         description,
         pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
-        critique_wanted: form.get('critique_wanted') === 'on'
+        critique_wanted: form.get('critique_wanted') === 'on',
+        theme_id: new URLSearchParams(location.hash.split('?')[1] || '').get('theme') || null
       };
       if (coverPath) postValues.cover_path = coverPath;
       const { data: post, error } = await sb.from('posts').insert(postValues).select().single();
@@ -1663,6 +1747,9 @@ async function renderRead(id, query = '') {
     post.view_count = Number(post.view_count || 0) + 1;
     sb.rpc('increment_post_view', { target_post: id }).then(() => {});
   }
+  if (currentUser) {
+    sb.from('view_history').upsert({ user_id: currentUser.id, post_id: id, viewed_at: new Date().toISOString() }).then(() => {});
+  }
 
   const { data: chapters, error: chapterError } = await sb.from('chapters').select('*').eq('post_id', id).order('position', { ascending: true });
   const { data: profile } = await sb.from('profiles').select('id,username,display_name').eq('id', post.author_id).maybeSingle();
@@ -1700,13 +1787,23 @@ async function renderRead(id, query = '') {
 
   const commentsByParent = new Map();
   const commentsByChapter = new Map();
+  const paragraphCounts = {};
+  const commentsByParagraph = new Map();
   comments.forEach(comment => {
     const key = comment.parent_comment_id || 'root';
     if (!commentsByParent.has(key)) commentsByParent.set(key, []);
     commentsByParent.get(key).push(comment);
     if (comment.chapter_id && !comment.parent_comment_id) {
-      if (!commentsByChapter.has(comment.chapter_id)) commentsByChapter.set(comment.chapter_id, []);
-      commentsByChapter.get(comment.chapter_id).push(comment);
+      if (comment.paragraph_index === null || comment.paragraph_index === undefined) {
+        if (!commentsByChapter.has(comment.chapter_id)) commentsByChapter.set(comment.chapter_id, []);
+        commentsByChapter.get(comment.chapter_id).push(comment);
+      } else {
+        const pKey = `${comment.chapter_id}:${comment.paragraph_index}`;
+        if (!commentsByParagraph.has(pKey)) commentsByParagraph.set(pKey, []);
+        commentsByParagraph.get(pKey).push(comment);
+        paragraphCounts[comment.chapter_id] = paragraphCounts[comment.chapter_id] || {};
+        paragraphCounts[comment.chapter_id][comment.paragraph_index] = (paragraphCounts[comment.chapter_id][comment.paragraph_index] || 0) + 1;
+      }
     }
   });
   const renderComment = (c, depth = 0) => {
@@ -1722,7 +1819,7 @@ async function renderRead(id, query = '') {
           <span class="comment-author">${esc(displayName(cp, 'Anonim'))}</span>
           <span class="comment-date">${esc(formatDate(c.created_at))}</span>
         </div>
-        <div class="comment-body">${esc(c.body)}</div>
+        <div class="comment-body">${c.media_second !== null && c.media_second !== undefined ? `<button class="comment-ts" type="button" data-sec="${c.media_second}" title="Medyada bu ana git">⏱️ ${Math.floor(c.media_second / 60)}:${String(c.media_second % 60).padStart(2, '0')}</button> ` : ''}${esc(c.body)}</div>
         <div class="comment-tools">
           <button class="comment-like ${commentLiked ? 'liked' : ''}" data-comment-id="${esc(c.id)}" type="button" aria-pressed="${commentLiked}" aria-label="Yorumu beğen">
             <span class="heart">${commentLiked ? '❤️' : '🤍'}</span><span class="comment-like-count">${commentLikeCounts[c.id] || 0}</span>
@@ -1923,7 +2020,7 @@ async function renderRead(id, query = '') {
       return `
       <section class="chapter" id="chapter-${i}" data-chapter-index="${i}">
         <h3>${esc(ch.title || 'Bölüm')}</h3>
-        <div class="chapter-body">${post.kind === 'book' ? formatBookText(ch.body || '') : esc(ch.body || '')}</div>
+        <div class="chapter-body">${renderParagraphs(ch.body || '', ch.id, paragraphCounts[ch.id] || {}, post.kind === 'book')}</div>
         <div class="chapter-comments">
           <button class="chapter-comments-toggle" data-chapter="${esc(ch.id)}" type="button">💬 Bölüm yorumları (<span>${chComments.length}</span>)</button>
           <div class="chapter-comments-panel" hidden>
@@ -1945,7 +2042,10 @@ async function renderRead(id, query = '') {
       ${currentUser ? `
         <form class="comment-form" id="commentForm">
           <textarea id="commentBody" placeholder="Yorumunu yaz…" required maxlength="1000"></textarea>
-          <button class="btn primary" type="submit">Yorumu gönder</button>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button class="btn primary" type="submit">Yorumu gönder</button>
+            ${['music','video'].includes(post.type) && post.media_url ? `<button class="btn ghost small" id="timestampBtn" type="button">⏱️ Bu anı işaretle</button><span class="small" id="timestampHint"></span>` : ''}
+          </div>
         </form>
       ` : `
         <div class="empty">Yorum yapmak için <a href="#/auth?signup">giriş yap</a>.</div>
@@ -1995,6 +2095,15 @@ async function renderRead(id, query = '') {
     button.disabled = false;
   });
 
+  let pendingTimestamp = null;
+  document.getElementById('timestampBtn')?.addEventListener('click', () => {
+    const media = app.querySelector('video.media, audio.media') || app.querySelector('video, audio');
+    if (!media || !isFinite(media.currentTime)) return;
+    pendingTimestamp = Math.floor(media.currentTime);
+    const hint = document.getElementById('timestampHint');
+    if (hint) hint.textContent = `${Math.floor(pendingTimestamp / 60)}:${String(pendingTimestamp % 60).padStart(2, '0')} işaretlendi`;
+    document.getElementById('commentBody')?.focus();
+  });
   document.getElementById('commentForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -2003,11 +2112,15 @@ async function renderRead(id, query = '') {
     const button = form.querySelector('button[type="submit"]');
     button.disabled = true;
     const { data, error: cErr } = await sb.from('comments').insert({
-      post_id: id, author_id: currentUser.id, body
+      post_id: id, author_id: currentUser.id, body,
+      media_second: pendingTimestamp
     }).select('*').single();
     button.disabled = false;
     if (cErr) { alert('Yorum eklenemedi: ' + cErr.message); return; }
     form.reset();
+    pendingTimestamp = null;
+    const hint = document.getElementById('timestampHint');
+    if (hint) hint.textContent = '';
     appendComment(data);
   });
   bindCommentInteractions(document.getElementById('commentsList'));
@@ -2047,6 +2160,59 @@ async function renderRead(id, query = '') {
       if (added) { bindCommentInteractions(added); bindReportForms(added); }
       const count = form.parentElement.parentElement.querySelector('.chapter-comments-toggle span');
       if (count) count.textContent = commentsByChapter.get(chapterKey).length;
+    });
+  });
+  document.querySelectorAll('.para-badge').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const paraEl = document.querySelector(`.para[data-chapter="${CSS.escape(btn.dataset.chapter)}"][data-para="${CSS.escape(btn.dataset.para)}"]`);
+      if (!paraEl) return;
+      const pKey = `${btn.dataset.chapter}:${btn.dataset.para}`;
+      const existing = paraEl.querySelector('.para-panel');
+      if (existing) { existing.remove(); return; }
+      document.querySelectorAll('.para-panel').forEach(p => p.remove());
+      const pComments = commentsByParagraph.get(pKey) || [];
+      const panel = document.createElement('div');
+      panel.className = 'para-panel';
+      panel.innerHTML = `
+        <div class="para-comments-list">${pComments.length ? pComments.map(c => renderComment(c)).join('') : '<div class="empty small">Bu paragrafa henüz yorum yok.</div>'}</div>
+        ${currentUser ? `<form class="chapter-comment-form para-comment-form" data-chapter="${esc(btn.dataset.chapter)}" data-para="${esc(btn.dataset.para)}"><textarea maxlength="1000" placeholder="Bu paragrafa yorum yaz…" required></textarea><button class="btn small" type="submit">Gönder</button></form>` : '<div class="small" style="margin-top:8px">Yorum için <a href="#/auth?login">giriş yap</a>.</div>'}`;
+      paraEl.appendChild(panel);
+      paraEl.querySelectorAll('.comment').forEach(c => { bindCommentInteractions(c); });
+      bindReportForms(panel);
+      panel.querySelector('.para-comment-form')?.addEventListener('submit', async e => {
+        e.preventDefault();
+        const form = e.currentTarget;
+        const textarea = form.querySelector('textarea');
+        const body = textarea.value.trim();
+        if (!body) return;
+        const submitBtn = form.querySelector('button[type="submit"]');
+        submitBtn.disabled = true;
+        const { data, error: cErr } = await sb.from('comments').insert({
+          post_id: id, author_id: currentUser.id,
+          chapter_id: btn.dataset.chapter, paragraph_index: Number(btn.dataset.para), body
+        }).select('*').single();
+        submitBtn.disabled = false;
+        if (cErr) { alert('Yorum eklenemedi: ' + cErr.message); return; }
+        comments.push(data);
+        if (!commentsByParagraph.has(pKey)) commentsByParagraph.set(pKey, []);
+        commentsByParagraph.get(pKey).push(data);
+        const list = panel.querySelector('.para-comments-list');
+        if (commentsByParagraph.get(pKey).length === 1) list.innerHTML = '';
+        list.insertAdjacentHTML('beforeend', renderComment(data));
+        const added = list.querySelector(`.comment[data-comment-id="${data.id}"]`);
+        if (added) { bindCommentInteractions(added); bindReportForms(added); }
+        textarea.value = '';
+        btn.textContent = `💬 ${commentsByParagraph.get(pKey).length}`;
+      });
+    });
+  });
+  app.querySelectorAll('.comment-ts').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const media = app.querySelector('video.media, audio.media') || app.querySelector('video, audio');
+      if (!media) return;
+      media.currentTime = Number(btn.dataset.sec);
+      media.play?.().catch(() => {});
+      media.scrollIntoView({ behavior: 'smooth', block: 'center' });
     });
   });
   bindReportForms(app);
@@ -2185,7 +2351,22 @@ async function renderProfile(id) {
   let savedPosts = [];
   let savedPostsError = null;
   let savedProfileMap = {};
+  let historyPosts = [];
+  let historyProfileMap = {};
   if (isOwnProfile) {
+    const histResult = await sb.from('view_history').select('post_id,viewed_at').eq('user_id', userId).order('viewed_at', { ascending: false }).limit(12);
+    const histIds = (histResult.data || []).map(h => h.post_id);
+    if (histIds.length) {
+      const { data: histPosts } = await sb.from('posts').select('*').in('id', histIds);
+      const histById = new Map((histPosts || []).map(p => [p.id, p]));
+      historyPosts = histIds.map(id => histById.get(id)).filter(Boolean);
+      historyPosts = await attachBookCovers(historyPosts);
+      const histAuthorIds = [...new Set(historyPosts.map(p => p.author_id).filter(Boolean))];
+      const { data: histProfiles } = histAuthorIds.length
+        ? await sb.from('profiles').select('id,username,display_name').in('id', histAuthorIds)
+        : { data: [] };
+      historyProfileMap = Object.fromEntries((histProfiles || []).map(p => [p.id, p]));
+    }
     const savedResult = await sb.from('saved_posts').select('post_id').eq('user_id', userId).order('created_at', { ascending: false });
     savedPostsError = savedResult.error;
     const savedIds = (savedResult.data || []).map(row => row.post_id);
@@ -2293,6 +2474,15 @@ async function renderProfile(id) {
         <div class="post-tags">${hashtagHTML(post)}</div>
         <p>${esc(post.description || '')}</p>
       </article>`).join('')}
+    ${isOwnProfile && historyPosts.length ? `<section class="saved-section">
+      <div class="section-head"><div><div class="eyebrow">Geçmiş</div><h2>Son görüntülediklerim</h2></div><button class="btn ghost small" id="clearHistoryBtn" type="button">Geçmişi temizle</button></div>
+      <div class="saved-grid">${historyPosts.map(post => `<article class="card saved-card">
+        <div class="meta"><span>${esc(quickTypeLabel(post))}</span></div>
+        ${postCoverHTML(post)}${mediaHTML(post)}
+        <h3><a href="#/read/${encodeURIComponent(post.id)}">${esc(post.title || 'Başlıksız eser')}</a></h3>
+        <div class="meta">Yazar: <a href="#/user/${encodeURIComponent(post.author_id)}">${esc(displayName(historyProfileMap[post.author_id]))}</a></div>
+      </article>`).join('')}</div>
+    </section>` : ''}
     ${isOwnProfile ? `<section class="saved-section">
       <div class="section-head"><div><div class="eyebrow">Sana özel</div><h2>Kaydettiklerim</h2></div><div style="display:flex;gap:8px"><a class="btn ghost small" href="#/koleksiyonlar">📚 Koleksiyonlarım</a><a class="btn ghost small" href="#/ozet">📊 Halka Özetim</a></div></div>
       ${savedPostsError ? `<div class="empty">Kaydedilen eserler yüklenemedi.<br><span class="small">Veritabanı güncellemesi gerekebilir: ${esc(savedPostsError.message)}</span></div>`
@@ -2310,6 +2500,12 @@ async function renderProfile(id) {
     </main>
   `;
 
+  document.getElementById('clearHistoryBtn')?.addEventListener('click', async () => {
+    if (!confirm('Görüntüleme geçmişin silinsin mi?')) return;
+    const { error } = await sb.from('view_history').delete().eq('user_id', currentUser.id);
+    if (error) { alert('Geçmiş silinemedi: ' + error.message); return; }
+    renderProfile('me');
+  });
   document.getElementById('profileForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -2707,6 +2903,19 @@ async function renderAdmin() {
         <div id="editBadgeMessage" class="message" aria-live="polite"></div>
       </form>
     </section>
+    <section class="card" style="margin:18px 0"><h2>🎨 Haftalık tema</h2>
+      <div id="themeList">${loadingBlock('Temalar yükleniyor…')}</div>
+      <form id="themeForm" style="margin-top:14px">
+        <div class="field"><label for="themeTitle">Tema adı</label><input id="themeTitle" required maxlength="80" placeholder="Örn. Kayıp Şehir"></div>
+        <div class="field"><label for="themePrompt">Yönlendirme (isteğe bağlı)</label><input id="themePrompt" maxlength="300" placeholder="Bu temayla ne üretilsin?"></div>
+        <div class="field" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div><label for="themeStart">Başlangıç</label><input id="themeStart" type="date" required></div>
+          <div><label for="themeEnd">Bitiş</label><input id="themeEnd" type="date" required></div>
+        </div>
+        <button class="btn primary" type="submit">Temayı aç</button>
+        <div id="themeMessage" class="message" aria-live="polite"></div>
+      </form>
+    </section>
     ${bugCards ? `<section><h2>Hata bildirimleri</h2>${bugCards}</section>` : ''}
     ${flagCards ? `<section style="margin-top:32px"><h2>Otomatik yakalamalar</h2>${flagCards}</section>` : ''}
     <section${flagCards || bugCards ? ' style="margin-top:32px"' : ''}><h2>İnceleme kuyruğu</h2>${reportCards || '<div class="empty">Açık bildirim yok.</div>'}</section>
@@ -2755,6 +2964,48 @@ async function renderAdmin() {
     message.className = 'message success';
     grantForm.reset();
     loadCustomBadgeList();
+  });
+
+  const loadThemeList = async () => {
+    const list = document.getElementById('themeList');
+    if (!list) return;
+    const { data: rows, error } = await sb.from('weekly_themes').select('*').order('starts_on', { ascending: false }).limit(10);
+    if (error) { list.innerHTML = `<div class="message error">${esc(error.message)}</div>`; return; }
+    if (!rows?.length) { list.innerHTML = '<div class="empty">Henüz tema açılmadı.</div>'; return; }
+    const ids = rows.map(t => t.id);
+    const { data: counts } = await sb.from('posts').select('theme_id').in('theme_id', ids);
+    const countMap = {};
+    (counts || []).forEach(p => { countMap[p.theme_id] = (countMap[p.theme_id] || 0) + 1; });
+    list.innerHTML = rows.map(t => `
+      <div class="collection-item-row" style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)">
+        <span><strong>${esc(t.title)}</strong> <span class="small">${esc(t.starts_on)} → ${esc(t.ends_on)} · ${countMap[t.id] || 0} eser</span></span>
+        <button class="btn ghost small theme-toggle" data-id="${esc(t.id)}" data-active="${t.active}" type="button">${t.active ? 'Kapat' : 'Aç'}</button>
+      </div>`).join('');
+    list.querySelectorAll('.theme-toggle').forEach(btn => btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      const { error } = await sb.from('weekly_themes').update({ active: btn.dataset.active !== 'true' }).eq('id', btn.dataset.id);
+      if (error) alert('Tema güncellenemedi: ' + error.message);
+      loadThemeList();
+    }));
+  };
+  loadThemeList();
+  document.getElementById('themeForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const title = document.getElementById('themeTitle').value.trim();
+    const prompt = document.getElementById('themePrompt').value.trim();
+    const starts_on = document.getElementById('themeStart').value;
+    const ends_on = document.getElementById('themeEnd').value;
+    const msg = document.getElementById('themeMessage');
+    if (!starts_on || !ends_on || ends_on < starts_on) { msg.textContent = 'Bitiş tarihi başlangıçtan önce olamaz.'; msg.className = 'message error'; return; }
+    const btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    const { error } = await sb.from('weekly_themes').insert({ title, prompt: prompt || null, starts_on, ends_on });
+    btn.disabled = false;
+    if (error) { msg.textContent = 'Tema açılamadı: ' + error.message; msg.className = 'message error'; return; }
+    msg.textContent = `"${title}" teması açıldı.`; msg.className = 'message success';
+    form.reset();
+    loadThemeList();
   });
 
   const loadCustomBadgeList = async () => {
@@ -4051,6 +4302,16 @@ function formatBookText(value) {
     .replace(/\(([^()\n]+)\)/g, '<em>($1)</em>');
 }
 
+function renderParagraphs(body, chapterId, counts = {}, useMarkup = false) {
+  const paras = String(body || '').split(/\n{2,}|\r?\n/).map(p => p.trim()).filter(Boolean);
+  if (!paras.length) return `<div class="para">${esc(body || '')}</div>`;
+  return paras.map((p, i) => {
+    const count = counts[i] || 0;
+    const text = useMarkup ? formatBookText(p) : esc(p);
+    return `<div class="para" data-para="${i}" data-chapter="${esc(chapterId)}"><span class="para-text">${text}</span><button class="para-badge" type="button" title="Bu paragrafa yorum" data-para="${i}" data-chapter="${esc(chapterId)}">💬${count ? ` ${count}` : ''}</button></div>`;
+  }).join('');
+}
+
 function postCard(post, profileMap = {}) {
   const writing = !post.type || post.type === 'writing';
   const kind = quickTypeLabel(post);
@@ -4223,16 +4484,20 @@ async function renderDiscover(query = '') {
   if (params.get('sub') === 'yazarlar') return renderAuthors();
   if (params.get('sub') === 'rastgele') return openRandom();
   const quick = params.get('sub') === 'hizli';
+  const themeId = params.get('theme') || '';
+  const themeInfo = themeId ? (await sb.from('weekly_themes').select('title').eq('id', themeId).maybeSingle()).data : null;
   const selected = ['video','drawing','photo','writing','music'].includes(params.get('type')) ? params.get('type') : 'all';
   const filters = [['Tümü','all'],['Videolar','video'],['Müzik','music'],['Çizimler','drawing'],['Resimler','photo'],['Yazılar','writing']];
-  const linkFor = type => `#/section/kesfet?${quick ? 'sub=hizli&' : ''}type=${type}`;
+  const linkFor = type => `#/section/kesfet?${quick ? 'sub=hizli&' : ''}${themeId ? `theme=${encodeURIComponent(themeId)}&` : ''}type=${type}`;
   const myHash = location.hash;
   app.innerHTML = `
     <section class="hero" style="padding-bottom:8px"><div class="eyebrow">Halka · Keşfet</div><h1>${quick ? 'Hızlı keşfet' : 'Keşfet'}</h1><p class="subtitle">${quick ? 'Yeni eserleri kaydırarak gözden geçir.' : 'İlham veren yazıları, görselleri, videoları ve müzikleri bul.'}</p></section>
-    <div class="discover-switch"><a class="${!quick ? 'on' : ''}" href="#/section/kesfet">Keşfet sayfası</a><a class="${quick ? 'on' : ''}" href="#/section/kesfet?sub=hizli">Hızlı keşfet</a></div>
+    <div class="discover-switch"><a class="${!quick ? 'on' : ''}" href="#/section/kesfet${themeId ? `?theme=${encodeURIComponent(themeId)}` : ''}">Keşfet sayfası</a><a class="${quick ? 'on' : ''}" href="#/section/kesfet?sub=hizli${themeId ? `&theme=${encodeURIComponent(themeId)}` : ''}">Hızlı keşfet</a></div>
+    ${themeInfo ? `<div class="card theme-card" style="margin-bottom:14px"><div class="eyebrow">🎨 Tema filtresi</div><strong>${esc(themeInfo.title || 'Tema')}</strong> <a class="small" href="#/section/kesfet">filtreyi kaldır</a></div>` : ''}
     <div class="chips">${filters.map(([label,type]) => `<a class="chip ${selected === type ? 'on' : ''}" href="${linkFor(type)}">${label}</a>`).join('')}</div>
     <div id="discoverFeed">${loadingBlock('Eserler yükleniyor…')}</div>`;
   let q = sb.from('posts').select('*').order('created_at', { ascending: false }).limit(100);
+  if (themeId) q = q.eq('theme_id', themeId);
   if (selected === 'writing') q = q.or('type.eq.writing,type.is.null');
   else if (selected !== 'all') q = q.eq('type', selected);
   const { data, error } = await q;
@@ -4394,7 +4659,7 @@ const MEDIA_CREATE = {
 const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 const VIDEO_EXT = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 
-async function publishMediaPost({ type, file, mime, title, tags, description }) {
+async function publishMediaPost({ type, file, mime, title, tags, description, pen_name, critique_wanted }) {
   const cfg = MEDIA_CREATE[type];
   mime = String(mime || '').split(';')[0].trim();
   if (/^image\//.test(mime)) {
@@ -4408,7 +4673,8 @@ async function publishMediaPost({ type, file, mime, title, tags, description }) 
   const mediaUrl = sb.storage.from('post-media').getPublicUrl(path).data.publicUrl;
   const { data: post, error } = await sb.from('posts').insert({
     author_id: currentUser.id, title, description, tags,
-    category: tags[0] || 'Diğer', type, kind: type, media_url: mediaUrl
+    category: tags[0] || 'Diğer', type, kind: type, media_url: mediaUrl,
+    pen_name: pen_name || null, critique_wanted: !!critique_wanted
   }).select().single();
   if (error) { await sb.storage.from('post-media').remove([path]); throw new Error('Eser oluşturulamadı: ' + error.message); }
   return post;
@@ -4417,6 +4683,8 @@ async function publishMediaPost({ type, file, mime, title, tags, description }) 
 function mediaPostFormHTML(idPrefix) {
   return `
     <div class="field"><label for="${idPrefix}Title">Eserin adı</label><input id="${idPrefix}Title" name="title" required maxlength="120" placeholder="Eserinin adı"></div>
+    <div class="field"><label for="${idPrefix}PenName">Kalem adı <span class="small">(isteğe bağlı)</span></label><input id="${idPrefix}PenName" name="pen_name" maxlength="60" placeholder="Boş bırakırsan profil adın görünür"><div class="small">Bu eserde profil adın yerine bu isim gösterilir.</div></div>
+    <div class="field" style="display:flex;align-items:center;gap:8px"><input id="${idPrefix}Critique" name="critique_wanted" type="checkbox" style="width:auto"><label for="${idPrefix}Critique" style="margin:0">🎯 Bu esere eleştiri istiyorum</label></div>
     <div class="field"><label for="${idPrefix}Tags">Hashtag'ler</label><input id="${idPrefix}Tags" name="tags" maxlength="160" placeholder="çizim, portre"><div class="small">Virgül veya boşlukla ayır; en fazla 5 hashtag.</div><div id="${idPrefix}TagPreview" class="post-tags" aria-live="polite"></div></div>
     <div class="field"><label for="${idPrefix}Desc">Kısa tanıtım</label><textarea id="${idPrefix}Desc" name="description" maxlength="1200" placeholder="Eserin hakkında birkaç cümle…"></textarea></div>`;
 }
@@ -4795,7 +5063,9 @@ function renderCreateMedia(type, mode) {
         mime = capturedMime;
       }
       if (file.size > cfg.maxMB * 1024 * 1024) { showMessage(`Dosya ${cfg.maxMB} MB sınırını aşmamalı.`, true); return; }
-      const post = await publishMediaPost({ type, file, mime, title, tags, description });
+      const post = await publishMediaPost({ type, file, mime, title, tags, description,
+        pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
+        critique_wanted: form.get('critique_wanted') === 'on' });
       stopCameraStream();
       clearDraft();
       location.hash = '#/read/' + encodeURIComponent(post.id);
@@ -4828,6 +5098,15 @@ function renderCreateMusic(mode) {
         <div class="field">
           <label for="musicTitle">Eserin adı</label>
           <input id="musicTitle" name="title" required maxlength="120" placeholder="Parçanın adı">
+        </div>
+        <div class="field">
+          <label for="musicPenName">Kalem adı <span class="small">(isteğe bağlı)</span></label>
+          <input id="musicPenName" name="pen_name" maxlength="60" placeholder="Boş bırakırsan profil adın görünür">
+          <div class="small">Bu eserde profil adın yerine bu isim gösterilir.</div>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input id="musicCritique" name="critique_wanted" type="checkbox" style="width:auto">
+          <label for="musicCritique" style="margin:0">🎯 Bu esere eleştiri istiyorum</label>
         </div>
         <div class="field">
           <label for="musicTags">Hashtag'ler</label>
@@ -4989,6 +5268,8 @@ function renderCreateMusic(mode) {
         type: 'music',
         kind: 'music',
         media_url: mediaUrl,
+        pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
+        critique_wanted: form.get('critique_wanted') === 'on',
         ...(coverPath ? { cover_path: coverPath } : {})
       }).select().single();
       if (error) { showMessage('Parça oluşturulamadı: ' + error.message, true); return; }
@@ -5600,12 +5881,27 @@ async function init() {
       await loadProfile();
       await refreshAdminAccess();
       setNav();
+      watchNotifications();
       if (event === 'SIGNED_IN' && await requireMfaChallenge()) location.hash = '#/auth?mfa';
     }, 0);
   });
   window.addEventListener('hashchange', route);
   window.addEventListener('pagehide', flushDraftAbandonOnLeave);
   setInterval(refreshNotificationBadge, 60000);
+  let notifRealtime = null;
+  const watchNotifications = () => {
+    if (notifRealtime) { sb.removeChannel(notifRealtime); notifRealtime = null; }
+    if (!currentUser) return;
+    try {
+      notifRealtime = sb.channel(`notif-${currentUser.id}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}` }, () => {
+          refreshNotificationBadge();
+          if (!location.hash.startsWith('#/notifications')) cemberCelebrate('🔔 Yeni bir bildirimin var — Bildirimler sayfasına bakabilirsin.');
+        })
+        .subscribe();
+    } catch {}
+  };
+  watchNotifications();
   setInterval(() => {
     if (!currentUser || document.hidden) return;
     sb.from('profiles').update({ last_active_at: new Date().toISOString() }).eq('id', currentUser.id).then(() => {});
