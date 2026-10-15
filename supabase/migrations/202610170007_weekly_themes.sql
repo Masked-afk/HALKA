@@ -23,15 +23,15 @@ drop policy if exists weekly_themes_select on public.weekly_themes;
 create policy weekly_themes_select on public.weekly_themes
   for select to anon, authenticated using (true);
 
--- Temaları yalnızca adminler açar/kapatır (profiles.is_admin kontrolü RPC üzerinden).
+-- Temaları yalnızca adminler açar/kapatır (admin_users tablosu üzerinden).
 drop policy if exists weekly_themes_admin_write on public.weekly_themes;
 create policy weekly_themes_admin_write on public.weekly_themes
   for insert to authenticated
-  with check (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+  with check ((select public.is_current_user_admin()));
 
 drop policy if exists weekly_themes_admin_update on public.weekly_themes;
 create policy weekly_themes_admin_update on public.weekly_themes
   for update to authenticated
-  using (exists (select 1 from public.profiles where id = auth.uid() and is_admin = true));
+  using ((select public.is_current_user_admin()));
 
 notify pgrst, 'reload schema';
