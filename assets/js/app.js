@@ -841,7 +841,7 @@ async function loadFeed(append = false) {
         <h3><a href="#/read/${encodeURIComponent(post.id)}">${esc(title)}</a></h3>
         <div class="post-tags">${hashtagHTML(post)}</div>
         <p>${esc(post.description || 'Bu eser için henüz bir açıklama eklenmemiş.')}</p>
-        <div class="meta">${!post.type || post.type === 'writing' ? 'Yazar' : 'Paylaşan'}: <a href="#/user/${encodeURIComponent(post.author_id)}">${esc(author)}</a></div>
+        <div class="meta">${!post.type || post.type === 'writing' ? 'Yazar' : 'Paylaşan'}: ${post.pen_name ? `<span title="Kalem adı">✒️ ${esc(post.pen_name)}</span>` : `<a href="#/user/${encodeURIComponent(post.author_id)}">${esc(author)}</a>`}</div>
         <div class="post-actions">
           <button class="like-btn ${isLiked ? 'liked' : ''}" data-post-id="${esc(post.id)}" aria-pressed="${isLiked}"><span class="heart">${isLiked ? '❤️' : '🤍'}</span> <span class="like-count">${likes}</span></button>
           <a class="comment-toggle" href="#/read/${encodeURIComponent(post.id)}">💬 Yorumlar</a>
@@ -1171,6 +1171,7 @@ async function renderRelay(id) {
   });
 
   try {
+    if (relayRealtime) { sb.removeChannel(relayRealtime); relayRealtime = null; }
     relayRealtime = sb.channel(`relay-${id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'relay_turns', filter: `story_id=eq.${id}` }, () => renderRelay(id))
       .subscribe();

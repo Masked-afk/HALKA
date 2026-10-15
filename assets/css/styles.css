@@ -446,8 +446,8 @@ body.has-mini-player{padding-bottom:70px}
 .comment-like{display:inline-flex;align-items:center;gap:5px;background:none;border:0;color:var(--muted);font-size:13px;padding:3px 6px;border-radius:8px}
 .comment-like:hover,.comment-like.liked{color:var(--red)}
 .comment-like .heart{font-size:15px}
-.comment-del,.comment-edit{background:none;border:0;color:var(--muted);font-size:12px;cursor:pointer;margin-left:4px}
-.comment-del:hover,.comment-edit:hover{color:var(--gold2)}
+.comment-del,.comment-edit,.comment-report-toggle,.comment-admin-flag{background:none;border:0;color:var(--muted);font-size:12px;cursor:pointer;padding:5px 6px}
+.comment-del:hover,.comment-edit:hover,.comment-report-toggle:hover,.comment-admin-flag:hover{color:var(--gold2)}
 .comment-edit-form{margin-top:10px;display:grid;gap:8px}
 .comment-edit-form[hidden]{display:none}
 .comment-edit-form textarea{min-height:64px}
