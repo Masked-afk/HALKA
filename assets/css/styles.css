@@ -351,6 +351,10 @@ body.has-mini-player{padding-bottom:70px}
 .comment-ts{background:none;border:1px solid var(--gold);border-radius:6px;color:var(--gold2);font-size:11px;padding:1px 7px;cursor:pointer;margin-right:6px}
 .comment-ts:hover{background:rgba(232,146,60,.12)}
 
+.manga-page{font-family:'Fredoka',sans-serif;font-weight:600;color:var(--gold2);margin-top:22px;border-bottom:1px solid var(--line);padding-bottom:4px}
+.manga-panel{font-family:'Fredoka',sans-serif;color:var(--gold2);font-weight:500}
+.manga-sfx{color:var(--gold);font-weight:700;letter-spacing:2px}
+
 .top-posts-shell{margin:8px 0 30px}
 .top-posts-strip{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:12px}
 .top-post-card{display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);border-radius:14px;padding:14px;background:var(--card,#1e1c17);color:inherit;text-decoration:none;transition:border-color .15s,transform .15s}

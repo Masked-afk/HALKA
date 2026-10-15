@@ -1551,18 +1551,18 @@ function renderWrite() {
     manga: {
       title: 'Manga adı', titlePlaceholder: 'Manganın adını yaz…',
       description: 'Manga tanıtımı', descriptionPlaceholder: 'Manganın konusunu, kahramanını ve tonunu birkaç cümleyle anlat…',
-      heading: 'İlk bölüm', help: 'Manga için:\n1. Ad ve kısa tanıtım ekle.\n2. İstersen kapak yükle veya oluşturucuyla tasarla.\n3. Bölümleri senaryo/öykü metni olarak yaz.\n4. Yayımladıktan sonra yeni bölümler ekleyebilirsin.\n\nBiçim: **kalın**, (italik).',
-      chapterLabel: 'Bölüm adı', chapterPlaceholder: '1. Bölüm', bodyLabel: 'İlk bölüm metni',
-      bodyPlaceholder: 'Sahne sahne anlat; panel tasvirleri ve diyaloglarla ilerle…',
-      starter: 'Açılış paneli / sahne:\n\nKarakterler:\n\nBölüm sonu kancası:'
+      heading: 'İlk bölüm', help: 'Manga, düzyazı değil sayfa/panel senaryosu olarak yazılır:\n1. Sayfa ve panel numarası ver.\n2. Her panelde kadrajı 1-2 cümleyle anlat (yakın plan, açı, ifade, ışık).\n3. Diyalogu KARAKTER: replik biçiminde panelin altına yaz — balon başına kısa tut.\n4. Ses efektlerini SFX: ile belirt.\n5. Büyük sürprizi sağ sayfanın son paneline sakla — sayfa çevirme şoku!\n\nBiçim: **kalın**, (italik).',
+      chapterLabel: 'Bölüm adı', chapterPlaceholder: '1. Bölüm', bodyLabel: 'Bölüm senaryosu',
+      bodyPlaceholder: 'Sayfa 1\n\nPanel 1 — kadraj tasviri…\nKARAKTER: replik\nSFX: …\n\nPanel 2 — …',
+      starter: 'Sayfa 1\n\nPanel 1 — Geniş açı: mekânı ve atmosferi kur.\nKAHRAMAN: (açılış repliği)\n\nPanel 2 — Yakın plan: kahramanın ifadesi.\nSFX: …\n\nPanel 3 — Aksiyon ya da olay kıvılcımı.\n\n…\n\nSon sayfanın son paneli — bölümün en büyük vuruşu / kancası.'
     },
     light_novel: {
       title: 'Light novel adı', titlePlaceholder: 'Eserinin adını yaz…',
       description: 'Tanıtım', descriptionPlaceholder: 'Arka kapak tadında kısa bir tanıtım yaz…',
-      heading: 'İlk bölüm', help: 'Light novel için:\n1. Ad ve kısa tanıtım ekle.\n2. İstersen kapak yükle veya oluşturucuyla tasarla.\n3. İlk bölümün adını ve metnini yaz.\n4. Yayımladıktan sonra yeni bölümler ekleyebilirsin.\n\nBiçim: **kalın**, (italik).',
+      heading: 'İlk bölüm', help: 'Light novel, "manganın yazıyla çekilmiş hâli" gibidir:\n1. Hızlı ve okunabilir yaz; uzun tasvir bloklarından kaçın.\n2. Diyalog ağırlıklı git — yaklaşık %70 diyalog, %30 anlatı iyi bir denge.\n3. Birinci tekil anlatıcı ve iç monolog kahramanın sesini güçlendirir.\n4. Bölümü kısa tut ve bir kancayla (cliffhanger / duygu vuruşu) bitir.\n\nBiçim: **kalın**, (italik).',
       chapterLabel: 'Bölüm adı', chapterPlaceholder: '1. Bölüm', bodyLabel: 'İlk bölüm metni',
-      bodyPlaceholder: 'Kahramanın bakış açısından sahneyi kur; içses ve diyalog dengesini tut…',
-      starter: 'Açılış sahnesi:\n\nKahraman ve dünya:\n\nBölüm sonu kancası:'
+      bodyPlaceholder: 'Kısa cümlelerle sahneye gir; kahramanın sesiyle diyalog ve içsesi harmanla…',
+      starter: 'Açılış: kahramanın içsesiyle günlük bir an ya da olayın ortasına gir.\n\nİlk diyalog: karşılaşma / çatışma kıvılcımı.\n\nGelişme: diyalog ağırlıklı sahne.\n\nKapanış: bölümü bitiren kanca — merak ya da duygu vuruşu.'
     }
   };
   const applyWritingTemplate = kind => {
@@ -2040,7 +2040,7 @@ async function renderRead(id, query = '') {
       return `
       <section class="chapter" id="chapter-${i}" data-chapter-index="${i}">
         <h3>${esc(ch.title || 'Bölüm')}</h3>
-        <div class="chapter-body">${renderParagraphs(ch.body || '', ch.id, paragraphCounts[ch.id] || {}, isChapteredKind(post.kind))}</div>
+        <div class="chapter-body">${renderParagraphs(ch.body || '', ch.id, paragraphCounts[ch.id] || {}, post.kind)}</div>
         <div class="chapter-comments">
           <button class="chapter-comments-toggle" data-chapter="${esc(ch.id)}" type="button">💬 Bölüm yorumları (<span>${chComments.length}</span>)</button>
           <div class="chapter-comments-panel" hidden>
@@ -4322,13 +4322,21 @@ function formatBookText(value) {
     .replace(/\(([^()\n]+)\)/g, '<em>($1)</em>');
 }
 
-function renderParagraphs(body, chapterId, counts = {}, useMarkup = false) {
+function renderParagraphs(body, chapterId, counts = {}, kind = null) {
   const paras = String(body || '').split(/\n{2,}|\r?\n/).map(p => p.trim()).filter(Boolean);
   if (!paras.length) return `<div class="para">${esc(body || '')}</div>`;
+  const useMarkup = isChapteredKind(kind);
+  const isManga = kind === 'manga';
   return paras.map((p, i) => {
     const count = counts[i] || 0;
     const text = useMarkup ? formatBookText(p) : esc(p);
-    return `<div class="para" data-para="${i}" data-chapter="${esc(chapterId)}"><span class="para-text">${text}</span><button class="para-badge" type="button" title="Bu paragrafa yorum" data-para="${i}" data-chapter="${esc(chapterId)}">💬${count ? ` ${count}` : ''}</button></div>`;
+    let cls = '';
+    if (isManga) {
+      if (/^sayfa\s+\d/i.test(p)) cls = ' manga-page';
+      else if (/^panel\s+\d/i.test(p)) cls = ' manga-panel';
+      else if (/^sfx\s*:/i.test(p)) cls = ' manga-sfx';
+    }
+    return `<div class="para${cls}" data-para="${i}" data-chapter="${esc(chapterId)}"><span class="para-text">${text}</span><button class="para-badge" type="button" title="Bu paragrafa yorum" data-para="${i}" data-chapter="${esc(chapterId)}">💬${count ? ` ${count}` : ''}</button></div>`;
   }).join('');
 }
 
