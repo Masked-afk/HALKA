@@ -5,6 +5,8 @@
     "ignore": [
       "firebase.json",
       ".firebaserc",
+      ".git/**",
+      ".firebase/**",
       "**/.*",
       "**/node_modules/**",
       "supabase/**",
