@@ -73,6 +73,7 @@ let cachedPosts = [];
 let currentAuthMode = 'signup';
 let feedSort = 'new';
 let feedSearch = '';
+let feedCritique = false;
 let chatRefreshTimer = null;
 
 // Supabase'te kurulumu tamamlanan sağlayıcıları buraya ekle: 'google','github','facebook','twitter','apple','discord'
@@ -419,6 +420,7 @@ function renderHome() {
       <div class="hero-art"><svg class="mira-svg mira-float mira-hero" viewBox="0 0 220 220" role="img" aria-label="Çember, Halka maskotu"><use href="#miraArt"/></svg></div>
     </section>
     <div id="continueReadingHome"></div>
+    <div id="streakHome"></div>
     <div id="storyBar"></div>
     <section class="top-posts-shell">
       <div class="section-head"><div><div class="eyebrow">Öne çıkanlar</div><h2>En çok konuşulan eserler</h2></div>
@@ -439,6 +441,8 @@ function renderHome() {
           <option value="liked" ${feedSort === 'liked' ? 'selected' : ''}>En çok beğenilen</option>
         </select>
         <button class="btn ghost" id="refreshBtn">Yenile ↻</button>
+        <button class="btn ghost" id="randomPostBtn" title="Rastgele bir eser aç">🎲 Şansıma</button>
+        <button class="chip ${feedCritique ? 'on' : ''}" id="critiqueChip" type="button">🎯 Eleştiri bekleyenler</button>
       </div>
       <div id="feed"><div class="loading"><div class="spinner-container"><div class="spinner-rings"></div><span>Eserler yükleniyor…</span></div></div></div>
     </section>
@@ -449,6 +453,20 @@ function renderHome() {
     if (plusBtn && panel) { panel.hidden = false; plusBtn.setAttribute('aria-expanded', 'true'); }
   });
   document.getElementById('refreshBtn').addEventListener('click', loadFeed);
+  document.getElementById('critiqueChip').addEventListener('click', () => {
+    feedCritique = !feedCritique;
+    document.getElementById('critiqueChip').classList.toggle('on', feedCritique);
+    loadFeed();
+  });
+  document.getElementById('randomPostBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('randomPostBtn');
+    btn.disabled = true;
+    const { data } = await sb.from('posts').select('id').limit(300);
+    btn.disabled = false;
+    const pool = data || [];
+    if (!pool.length) return;
+    location.hash = `#/read/${encodeURIComponent(pool[Math.floor(Math.random() * pool.length)].id)}`;
+  });
   document.getElementById('sortSelect').addEventListener('change', e => {
     feedSort = e.target.value;
     loadFeed();
@@ -466,6 +484,24 @@ function renderHome() {
   loadFeed();
   loadContinueReading();
   loadStories();
+  loadStreakCard();
+}
+
+async function loadStreakCard() {
+  const box = document.getElementById('streakHome');
+  if (!box) return;
+  if (!currentUser) { box.innerHTML = ''; return; }
+  const { data } = await sb.rpc('production_streak', { target: currentUser.id });
+  const streak = Number(data?.streak || 0);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const known = JSON.parse(localStorage.getItem('halkaStreak') || 'null');
+  box.innerHTML = streak > 0
+    ? `<div class="card streak-card">🔥 <strong>${streak} gündür üretiyorsun</strong><span class="small"> — bugün de bir şey paylaşırsan seri büyür.</span></div>`
+    : '';
+  localStorage.setItem('halkaStreak', JSON.stringify({ streak, date: todayIso }));
+  if (streak > 0 && data?.last_date === todayIso && streak > (known?.streak || 0)) {
+    cemberCelebrate(`Bugün de ürettin! Seri ${streak} güne çıktı — yarın da devam edersen bu tempo efsane olur. 🔥`);
+  }
 }
 
 let storyGroups = [];
@@ -734,6 +770,7 @@ async function loadFeed(append = false) {
     const term = feedSearch.replace(/[%(),.*\\]/g, '').slice(0, 60);
     if (term) query = query.or(`title.ilike.%${term}%,description.ilike.%${term}%`);
   }
+  if (feedCritique) query = query.eq('critique_wanted', true);
   const { data: posts, error } = await query;
   feedLoading = false;
   if (error) {
@@ -797,6 +834,7 @@ async function loadFeed(append = false) {
           <span>${esc(quickTypeLabel(post))}</span>
           <span>· ${esc(formatDate(post.created_at))}</span>
           <span>· ${Number(post.view_count || 0)} görüntülenme</span>
+          ${post.critique_wanted ? '<span class="critique-badge">🎯 Eleştiri bekliyor</span>' : ''}
         </div>
         ${postCoverHTML(post)}
         ${mediaHTML(post)}
@@ -1020,6 +1058,125 @@ async function renderOzet() {
     <div style="text-align:center;margin-top:8px"><a class="btn ghost" href="#/profile">Profilime dön</a></div>`;
 }
 
+async function renderRelayList() {
+  if (!currentUser) { location.hash = '#/auth?login'; return; }
+  app.innerHTML = loadingBlock('Nöbetleşe hikâyeler yükleniyor…');
+  const [mineRes, openRes] = await Promise.all([
+    sb.from('relay_stories').select('*').or(`host_id.eq.${currentUser.id},partner_id.eq.${currentUser.id}`).order('updated_at', { ascending: false }).limit(30),
+    sb.from('relay_stories').select('*').eq('status', 'active').order('updated_at', { ascending: false }).limit(12)
+  ]);
+  const all = [...(mineRes.data || []), ...(openRes.data || [])];
+  const userIds = [...new Set(all.flatMap(s => [s.host_id, s.partner_id]))];
+  const { data: profs } = userIds.length
+    ? await sb.from('profiles').select('id,username,display_name').in('id', userIds) : { data: [] };
+  const profMap = Object.fromEntries((profs || []).map(p => [p.id, p]));
+  const rel = s => `${displayName(profMap[s.host_id])} × ${displayName(profMap[s.partner_id])}`;
+  const mine = mineRes.data || [];
+  const open = (openRes.data || []).filter(s => !mine.some(m => m.id === s.id));
+  app.innerHTML = `
+    <section class="hero" style="padding-bottom:8px"><div class="eyebrow">Birlikte üretim</div><h1>⚡ Nöbetleşe hikâye</h1>
+      <p class="subtitle">Bir ortak seç, sırayla paragraf yazın — hikâyeyi kimsenin tahmin edemeyeceği bir yere taşıyın.</p></section>
+    <section class="card">
+      <h2>Yeni hikâye başlat</h2>
+      <form id="relayStartForm">
+        <div class="field"><label for="relayTitle">Hikâye adı</label><input id="relayTitle" maxlength="80" required placeholder="Örn. Kayıp Vapur"></div>
+        <div class="field"><label for="relayPartner">Ortağın kullanıcı adı</label><input id="relayPartner" maxlength="40" required placeholder="@olmadan kullanıcı adı"></div>
+        <button class="btn primary" type="submit">Davet gönder ve başlat</button>
+      </form>
+      <div id="relayMessage" class="message" aria-live="polite"></div>
+    </section>
+    ${mine.length ? `<section class="card"><h2>Katıldıkların</h2>${mine.map(s => `
+      <a class="collection-item-row" href="#/relay/${encodeURIComponent(s.id)}">
+        <span><strong>${esc(s.title)}</strong> <span class="small">${esc(rel(s))}</span></span>
+        <span class="small">${s.status === 'active' ? `🟢 ${s.turn_count} paragraf` : '✅ Tamamlandı'}</span>
+      </a>`).join('')}</section>` : ''}
+    ${open.length ? `<section class="card"><h2>Devam edenler</h2>${open.map(s => `
+      <a class="collection-item-row" href="#/relay/${encodeURIComponent(s.id)}">
+        <span><strong>${esc(s.title)}</strong> <span class="small">${esc(rel(s))}</span></span>
+        <span class="small">${s.turn_count} paragraf</span>
+      </a>`).join('')}</section>` : ''}
+  `;
+  document.getElementById('relayStartForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const title = document.getElementById('relayTitle').value.trim();
+    const uname = document.getElementById('relayPartner').value.trim().replace(/^@/, '');
+    const msgEl = document.getElementById('relayMessage');
+    const { data: partner } = await sb.from('profiles').select('id').eq('username', uname).maybeSingle();
+    if (!partner) return setSettingsMessage(msgEl, `"${uname}" adlı kullanıcı bulunamadı.`, true);
+    const { data: storyId, error } = await sb.rpc('relay_start', { p_title: title, p_partner: partner.id });
+    if (error) return setSettingsMessage(msgEl, error.message, true);
+    location.hash = `#/relay/${encodeURIComponent(storyId)}`;
+  });
+}
+
+let relayRealtime = null;
+async function renderRelay(id) {
+  app.innerHTML = loadingBlock('Hikâye açılıyor…');
+  const { data: story } = await sb.from('relay_stories').select('*').eq('id', id).maybeSingle();
+  if (!story) { app.innerHTML = '<div class="empty">Hikâye bulunamadı.</div>'; return; }
+  const { data: turns } = await sb.from('relay_turns').select('*').eq('story_id', id).order('seq');
+  const ids = [...new Set([story.host_id, story.partner_id, ...(turns || []).map(t => t.author_id)])];
+  const { data: profs } = await sb.from('profiles').select('id,username,display_name').in('id', ids);
+  const profMap = Object.fromEntries((profs || []).map(p => [p.id, p]));
+  const isParticipant = currentUser && (currentUser.id === story.host_id || currentUser.id === story.partner_id);
+  const lastAuthor = (turns || []).length ? turns[turns.length - 1].author_id : null;
+  const myTurn = story.status === 'active' && isParticipant && lastAuthor !== currentUser.id;
+  const partner = currentUser && (story.host_id === currentUser.id ? profMap[story.partner_id] : profMap[story.host_id]);
+
+  app.innerHTML = `
+    <section class="hero" style="padding-bottom:8px">
+      <div class="eyebrow">⚡ Nöbetleşe hikâye · ${story.status === 'active' ? 'devam ediyor' : 'tamamlandı'}</div>
+      <h1>${esc(story.title)}</h1>
+      <p class="meta">${esc(displayName(profMap[story.host_id]))} × ${esc(displayName(profMap[story.partner_id]))} · ${(turns || []).length} paragraf</p>
+    </section>
+    <section class="card">
+      <div id="relayTurns">${(turns || []).length ? turns.map(t => `
+        <div class="relay-turn ${t.author_id === currentUser?.id ? 'mine' : ''}">
+          <p>${esc(t.body)}</p>
+          <div class="small relay-meta">${t.seq}. paragraf · ${esc(displayName(profMap[t.author_id]))} · ${esc(formatDate(t.created_at))}</div>
+        </div>`).join('') : '<div class="empty">Henüz ilk paragraf yazılmadı.</div>'}</div>
+      ${myTurn ? `
+        <form id="relayTurnForm" class="chapter-comment-form" style="margin-top:14px">
+          <textarea id="relayBody" maxlength="1200" required placeholder="Sıra sende — hikâyeyi devam ettir (en fazla 1200 karakter)"></textarea>
+          <button class="btn primary" type="submit">Paragrafı gönder</button>
+        </form>` : story.status === 'active' && isParticipant
+          ? `<p class="small" style="margin-top:12px">⏳ Sıra ${esc(displayName(partner))} tarafında — bildirim gitti, bekliyor.</p>` : ''}
+      ${isParticipant && story.status === 'active' && (turns || []).length ? `<button class="btn ghost small" id="relayFinishBtn" type="button" style="margin-top:10px">Hikâyeyi bitir</button>` : ''}
+      ${currentUser?.id === story.host_id ? `<button class="btn ghost small" id="relayDeleteBtn" type="button" style="margin-top:6px">Hikâyeyi sil</button>` : ''}
+      <div id="relayTurnMessage" class="message" aria-live="polite"></div>
+    </section>`;
+
+  document.getElementById('relayTurnForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = document.getElementById('relayBody').value.trim();
+    if (!body) return;
+    const btn = e.currentTarget.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    const { error } = await sb.rpc('relay_add_turn', { p_story: id, p_body: body });
+    btn.disabled = false;
+    if (error) return setSettingsMessage(document.getElementById('relayTurnMessage'), error.message, true);
+    renderRelay(id);
+  });
+  document.getElementById('relayFinishBtn')?.addEventListener('click', async () => {
+    if (!confirm('Hikâye tamamlandı olarak işaretlensin mi? Paragraf eklenemeyecek.')) return;
+    const { error } = await sb.rpc('relay_finish', { p_story: id });
+    if (error) { alert(error.message); return; }
+    renderRelay(id);
+  });
+  document.getElementById('relayDeleteBtn')?.addEventListener('click', async () => {
+    if (!confirm('Hikâye ve tüm paragrafları silinecek. Emin misin?')) return;
+    const { error } = await sb.rpc('relay_delete', { p_story: id });
+    if (error) { alert(error.message); return; }
+    location.hash = '#/relay';
+  });
+
+  try {
+    relayRealtime = sb.channel(`relay-${id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'relay_turns', filter: `story_id=eq.${id}` }, () => renderRelay(id))
+      .subscribe();
+  } catch {}
+}
+
 function bindSaveButtons(scope = document) {
   scope.querySelectorAll('.save-btn').forEach(button => button.addEventListener('click', () => handleSave(button)));
 }
@@ -1231,6 +1388,15 @@ function renderWrite() {
           <input id="title" name="title" required maxlength="120" placeholder="Hikâyenin adı">
         </div>
         <div class="field">
+          <label for="penName">Kalem adı <span class="small">(isteğe bağlı)</span></label>
+          <input id="penName" name="pen_name" maxlength="60" placeholder="Boş bırakırsan profil adın görünür">
+          <div class="small">Bu eserde profil adın yerine bu isim gösterilir.</div>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input id="critiqueWanted" name="critique_wanted" type="checkbox" style="width:auto">
+          <label for="critiqueWanted" style="margin:0">🎯 Bu esere eleştiri istiyorum — "Eleştiri bekliyor" rozetiyle yayınla</label>
+        </div>
+        <div class="field">
           <label for="tags">Hashtag’ler</label>
           <input id="tags" name="tags" maxlength="160" list="hashtagSuggestions" placeholder="fantastik, günlük, kitap">
           <datalist id="hashtagSuggestions">${categories.filter(tag => tag !== 'Diğer').map(tag => `<option value="${esc(tagSlug(tag))}">`).join('')}</datalist>
@@ -1249,7 +1415,7 @@ function renderWrite() {
           <label for="description">Kısa tanıtım</label>
           <textarea id="description" name="description" maxlength="1200" placeholder="Yazını birkaç cümleyle tanıt…"></textarea>
         </div>
-        <div id="bookCoverField" class="field book-cover-field" hidden><label for="bookCover">Kitap kapağı</label><input id="bookCover" type="file" accept="image/jpeg,image/png,image/webp"><div class="small">JPG, PNG veya WebP · en fazla 5 MB</div><img id="bookCoverPreview" class="book-cover-preview" alt="Kitap kapağı önizlemesi"></div>
+        <div id="bookCoverField" class="field book-cover-field" hidden><label for="bookCover">Kitap kapağı</label><input id="bookCover" type="file" accept="image/jpeg,image/png,image/webp"><div class="small">JPG, PNG veya WebP · en fazla 5 MB · veya <button class="btn ghost small" id="coverMakerBtn" type="button">🎨 Kapak oluşturucu</button> ile sıfırdan tasarla</div><img id="bookCoverPreview" class="book-cover-preview" alt="Kitap kapağı önizlemesi"></div>
         <hr>
         <h2 id="writingBodyHeading">Yazı içeriği</h2>
         <p id="writingTemplateHelp" class="small"></p>
@@ -1317,6 +1483,7 @@ function renderWrite() {
     };
   };
   document.getElementById('kind').addEventListener('change', e => applyWritingTemplate(e.target.value));
+  document.getElementById('coverMakerBtn')?.addEventListener('click', () => openCoverMaker());
   document.getElementById('bookCover').addEventListener('change', event => {
     const file = event.currentTarget.files?.[0];
     const preview = document.getElementById('bookCoverPreview');
@@ -1366,7 +1533,9 @@ function renderWrite() {
         category: tags[0] || 'Diğer',
         tags,
         kind,
-        description
+        description,
+        pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
+        critique_wanted: form.get('critique_wanted') === 'on'
       };
       if (coverPath) postValues.cover_path = coverPath;
       const { data: post, error } = await sb.from('posts').insert(postValues).select().single();
@@ -1496,6 +1665,9 @@ async function renderRead(id, query = '') {
 
   const { data: chapters, error: chapterError } = await sb.from('chapters').select('*').eq('post_id', id).order('position', { ascending: true });
   const { data: profile } = await sb.from('profiles').select('id,username,display_name').eq('id', post.author_id).maybeSingle();
+  const { data: versions } = await sb.from('post_versions').select('*').eq('post_id', id).order('version_no', { ascending: true });
+  const versionList = versions || [];
+  const currentVersionNo = versionList.length + 1;
 
   const likesResult = await sb.from('likes').select('user_id').eq('post_id', id);
   const likes = likesResult.data || [];
@@ -1704,12 +1876,34 @@ async function renderRead(id, query = '') {
       <div class="post-tags">${hashtagHTML(post)}</div>
       <p class="subtitle">${esc(post.description || '')}</p>
       <div class="meta">
-        <span>${!post.type || post.type === 'writing' ? 'Yazar' : 'Paylaşan'}: <a href="#/user/${encodeURIComponent(post.author_id)}">${esc(displayName(profile))}</a></span>
+        <span>${!post.type || post.type === 'writing' ? 'Yazar' : 'Paylaşan'}: ${post.pen_name ? `<span title="Kalem adı">✒️ ${esc(post.pen_name)}</span>` : `<a href="#/user/${encodeURIComponent(post.author_id)}">${esc(displayName(profile))}</a>`}</span>
+        ${post.critique_wanted ? '<span class="critique-badge">🎯 Eleştiri bekliyor</span>' : ''}
         <span>· ${esc(formatDate(post.created_at))}</span>
         <span>· ${Number(post.view_count || 0)} görüntülenme</span>
       </div>
     </section>
     ${postCoverHTML(post)}${mediaHTML(post)}
+    ${versionList.length ? `
+    <div class="version-bar">
+      <span class="small">📜 ${currentVersionNo}. versiyon</span>
+      <div class="version-chips">
+        ${versionList.map(v => `<button class="chip version-chip" type="button" data-version="${v.version_no}">v${v.version_no}</button>`).join('')}
+        <button class="chip version-chip on" type="button" data-version="${currentVersionNo}">v${currentVersionNo} · güncel</button>
+      </div>
+      <div id="versionPanel" hidden></div>
+    </div>` : ''}
+    ${isOwner ? `
+    <div id="versionFormWrap" hidden>
+      <form id="versionForm" class="version-form">
+        <div class="eyebrow">📜 Yeni versiyon yayınla</div>
+        <p class="small">Mevcut hâl arşive alınır, eser güncellenir. Okuyucular eski versiyonları gezebilir.</p>
+        <div class="field"><label for="versionNote">Ne değişti? (isteğe bağlı)</label><input id="versionNote" name="note" maxlength="200" placeholder="Örn. renkleri düzelttim"></div>
+        ${post.media_url ? `<div class="field"><label for="versionFile">Yeni dosya (isteğe bağlı)</label><input id="versionFile" name="file" type="file" accept="${esc(MEDIA_CREATE[post.type]?.accept || 'image/jpeg,image/png,image/webp')}"><div class="small">Boş bırakırsan yalnızca başlık/açıklama güncellenir.</div></div>` : ''}
+        <div class="field"><label for="versionTitle">Yeni başlık (isteğe bağlı)</label><input id="versionTitle" name="title" maxlength="120" placeholder="${esc(post.title || '')}"></div>
+        <div class="field"><label for="versionDesc">Yeni açıklama (isteğe bağlı)</label><textarea id="versionDesc" name="description" maxlength="600" placeholder="${esc((post.description || '').slice(0, 200))}"></textarea></div>
+        <button class="btn primary small" type="submit">Versiyonu yayınla</button>
+      </form>
+    </div>` : ''}
       <div class="post-actions">
       <button class="like-btn ${userLiked ? 'liked' : ''}" id="readLikeBtn">
         <span class="heart">${userLiked ? '❤️' : '🤍'}</span>
@@ -1717,6 +1911,7 @@ async function renderRead(id, query = '') {
       </button>
         ${currentUser ? `<a class="btn ghost small" href="#/chat?share=${encodeURIComponent(post.id)}">Sohbette paylaş</a>` : ''}
         ${currentUser ? '<button class="btn ghost small" id="collectionBtn" type="button">📚 Koleksiyona ekle</button>' : ''}
+        ${isOwner ? '<button class="btn ghost small" id="newVersionBtn" type="button">📜 Yeni versiyon</button>' : ''}
         ${canReportPost ? '<button class="btn ghost small" id="reportPostToggle" type="button">Eseri bildir</button>' : ''}
         ${isCurrentUserAdmin ? '<button class="btn ghost small" id="adminFlagPost" type="button">⚑ İncelemeye al</button>' : ''}
     </div>
@@ -1859,6 +2054,71 @@ async function renderRead(id, query = '') {
     form.hidden = !form.hidden;
     if (!form.hidden) form.querySelector('select')?.focus();
   });
+  document.getElementById('newVersionBtn')?.addEventListener('click', () => {
+    const wrap = document.getElementById('versionFormWrap');
+    if (wrap) { wrap.hidden = !wrap.hidden; if (!wrap.hidden) wrap.querySelector('input')?.focus(); }
+  });
+  document.querySelectorAll('.version-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const panel = document.getElementById('versionPanel');
+      if (!panel) return;
+      const vno = Number(btn.dataset.version);
+      document.querySelectorAll('.version-chip').forEach(c => c.classList.toggle('on', c === btn));
+      if (vno === currentVersionNo) { panel.hidden = true; panel.innerHTML = ''; return; }
+      const v = versionList.find(x => x.version_no === vno);
+      if (!v) return;
+      const snapshot = { ...post, title: v.title || post.title, description: v.content ?? post.description, media_url: v.media_url || post.media_url };
+      panel.innerHTML = `<div class="version-snapshot"><div class="eyebrow">📜 v${vno} · ${esc(formatDate(v.created_at))}${v.note ? ` · ${esc(v.note)}` : ''}</div>${v.title && v.title !== post.title ? `<h3>${esc(v.title)}</h3>` : ''}${v.content && v.content !== post.description ? `<p>${esc(v.content)}</p>` : ''}${v.media_url && v.media_url !== post.media_url ? mediaHTML(snapshot) : ''}</div>`;
+      panel.hidden = false;
+      panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  });
+  document.getElementById('versionForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const submit = form.querySelector('button[type="submit"]');
+    const note = String(fd.get('note') || '').trim().slice(0, 200) || null;
+    const newTitle = String(fd.get('title') || '').trim().slice(0, 120) || null;
+    const newDesc = String(fd.get('description') || '').trim().slice(0, 600) || null;
+    let file = document.getElementById('versionFile')?.files?.[0] || null;
+    if (!newTitle && !newDesc && !file) { alert('Bir değişiklik gir — en az bir alan dolmalı.'); return; }
+    submit.disabled = true;
+    submit.textContent = 'Yayınlanıyor…';
+    try {
+      const { error: archErr } = await sb.from('post_versions').insert({
+        post_id: post.id, version_no: currentVersionNo,
+        title: post.title, content: post.description, media_url: post.media_url, note
+      });
+      if (archErr) throw new Error('Arşiv kaydedilemedi: ' + archErr.message);
+      let newMediaUrl = null;
+      if (file) {
+        const cfg = MEDIA_CREATE[post.type];
+        let mime = (file.type || 'application/octet-stream').split(';')[0].trim();
+        if (post.type === 'drawing' || post.type === 'photo') {
+          const compressed = await compressImage(file, 1920);
+          if (compressed !== file) { file = compressed; mime = 'image/webp'; }
+        }
+        const ext = ({ ...IMAGE_EXT, ...VIDEO_EXT, 'audio/mpeg': 'mp3', 'audio/wav': 'wav', 'audio/ogg': 'ogg', 'audio/webm': 'webm', 'audio/mp4': 'm4a' })[mime] || mime.split('/')[1] || 'bin';
+        const path = `${currentUser.id}/${cfg?.folder || 'files'}/${crypto.randomUUID()}.${ext}`;
+        const up = await sb.storage.from('post-media').upload(path, file, { contentType: mime, upsert: false });
+        if (up.error) throw new Error('Dosya yüklenemedi: ' + up.error.message);
+        newMediaUrl = sb.storage.from('post-media').getPublicUrl(path).data.publicUrl;
+      }
+      const update = {};
+      if (newTitle) update.title = newTitle;
+      if (newDesc) update.description = newDesc;
+      if (newMediaUrl) update.media_url = newMediaUrl;
+      if (!Object.keys(update).length) update.description = post.description || '';
+      const { error: upErr } = await sb.from('posts').update(update).eq('id', post.id).eq('author_id', currentUser.id);
+      if (upErr) throw new Error('Eser güncellenemedi: ' + upErr.message);
+      renderRead(id);
+    } catch (err) {
+      alert(err.message || 'Versiyon yayınlanamadı.');
+      submit.disabled = false;
+      submit.textContent = 'Versiyonu yayınla';
+    }
+  });
   if (new URLSearchParams(query).get('comments') === '1') requestAnimationFrame(() => document.querySelector('.comments-section')?.scrollIntoView({ behavior: 'smooth' }));
 
   if (currentUser && (chapters || []).length) initReadingProgress(post, chapters);
@@ -1904,6 +2164,8 @@ async function renderProfile(id) {
 
   const { data: posts, error } = await sb.from('posts').select('*').eq('author_id', userId).order('created_at', { ascending: false });
   const profilePosts = await attachBookCovers(posts || []);
+  const { data: streakData } = await sb.rpc('production_streak', { target: userId });
+  const streak = Number(streakData?.streak || 0);
 
   const name = displayName(profile);
   const isOwnProfile = currentUser?.id === userId;
@@ -1979,6 +2241,7 @@ async function renderProfile(id) {
       <div class="profile-stat"><strong>${Number(engagement.counts?.followers || 0)}</strong><span>Takipçi</span></div>
       <div class="profile-stat"><strong>${Number(engagement.counts?.following || 0)}</strong><span>Takip</span></div>
       <div class="profile-stat"><strong>${Number(engagement.counts?.views || 0)}</strong><span>Görüntülenme</span></div>
+      ${streak > 0 ? `<div class="profile-stat streak-stat" title="Ardışık üretim günü"><strong>🔥 ${streak}</strong><span>Gün serisi</span></div>` : ''}
     </div>` : ''}
     ${(() => { const L = levelInfo(Number(engagement.score || 0));
       return `<div class="level-strip"><span class="level-name">Sv. ${L.num} · ${esc(L.name)}</span>
@@ -2999,10 +3262,12 @@ async function renderNotifications() {
     friend_accept: 'arkadaşlık isteğini kabul etti',
     message: 'sana mesaj gönderdi',
     follow: 'seni takip etmeye başladı',
-    new_post: 'yeni bir eser paylaştı'
+    new_post: 'yeni bir eser paylaştı',
+    relay: 'nöbetleşe hikâyede seni bekliyor'
   };
   const targetFor = n => {
     if (n.type === 'badge') return '#/profile';
+    if (n.relay_id) return `#/relay/${encodeURIComponent(n.relay_id)}`;
     if (n.post_id) return `#/read/${encodeURIComponent(n.post_id)}`;
     if (n.type === 'friend_request') return '#/settings';
     if ((n.type === 'friend_accept' || n.type === 'follow') && n.actor_id) return `#/user/${encodeURIComponent(n.actor_id)}`;
@@ -3470,7 +3735,7 @@ const SECTIONS = {
 };
 
 const CREATE_MENU = [
-  { label: 'Yazı', items: [['Blog', '#/write?kind=blog'], ['Kısa Yazı', '#/write?kind=short'], ['Kitap', '#/write?kind=book']] },
+  { label: 'Yazı', items: [['Blog', '#/write?kind=blog'], ['Kısa Yazı', '#/write?kind=short'], ['Kitap', '#/write?kind=book'], ['⚡ Nöbetleşe hikâye', '#/relay']] },
   { label: 'Çizim', items: [['Tuvalde çiz', '#/create/drawing?mode=canvas'], ['Dosya yükle', '#/create/drawing?mode=file']] },
   { label: 'Fotoğraf', items: [['Kamerayla çek', '#/create/photo?mode=camera'], ['Galeriden seç', '#/create/photo?mode=file']] },
   { label: 'Video', items: [['Kamerayla kaydet', '#/create/video?mode=camera'], ['Dosya yükle', '#/create/video?mode=file']] },
@@ -3553,6 +3818,94 @@ document.addEventListener('change', e => {
   span.textContent = input.files?.[0]?.name || 'Dosya seçilmedi';
 });
 
+function openCoverMaker() {
+  document.getElementById('coverMakerModal')?.remove();
+  const PALETTES = [
+    ['#1e3a8a', '#0ea5e9'], ['#7c2d12', '#ea580c'], ['#14532d', '#22c55e'],
+    ['#581c87', '#c026d3'], ['#0f172a', '#334155'], ['#78350f', '#f59e0b']
+  ];
+  const modal = document.createElement('div');
+  modal.id = 'coverMakerModal';
+  modal.className = 'badge-modal-backdrop';
+  modal.innerHTML = `
+    <div class="card badge-modal" style="max-width:640px;text-align:left">
+      <button class="badge-modal-close" type="button" aria-label="Kapat">✕</button>
+      <h3 style="text-align:center">🎨 Kapak oluşturucu</h3>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start">
+        <canvas id="coverCanvas" width="400" height="600" style="border-radius:10px;max-width:45%;border:1px solid var(--line)"></canvas>
+        <div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:10px">
+          <div class="field"><label>Başlık</label><input id="cmTitle" maxlength="60" value="${esc(document.getElementById('title')?.value || '')}"></div>
+          <div class="field"><label>Yazar adı</label><input id="cmAuthor" maxlength="40" value="${esc(displayName(currentProfile || { display_name: currentUser?.user_metadata?.display_name }))}"></div>
+          <div class="field"><label>Simge (isteğe bağlı)</label><input id="cmEmoji" maxlength="4" placeholder="🌙"></div>
+          <div class="field"><label>Renk paleti</label>
+            <div style="display:flex;gap:6px;flex-wrap:wrap">${PALETTES.map((p, i) => `
+              <button class="cm-swatch" type="button" data-i="${i}" style="width:36px;height:36px;border-radius:8px;border:2px solid transparent;background:linear-gradient(135deg,${p[0]},${p[1]})"></button>`).join('')}</div>
+          </div>
+          <button class="btn primary" id="cmUse" type="button">Kapağı kullan</button>
+        </div>
+      </div>
+      <div id="cmMessage" class="message" aria-live="polite"></div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  modal.querySelector('.badge-modal-close').addEventListener('click', close);
+
+  let palette = PALETTES[0];
+  const canvas = modal.querySelector('#coverCanvas');
+  const ctx = canvas.getContext('2d');
+  const draw = () => {
+    const w = canvas.width, h = canvas.height;
+    const grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, palette[0]);
+    grad.addColorStop(1, palette[1]);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    const emoji = modal.querySelector('#cmEmoji').value.trim();
+    if (emoji) { ctx.font = '110px serif'; ctx.textAlign = 'center'; ctx.fillText(emoji, w / 2, h * 0.32); }
+    ctx.fillStyle = '#fff';
+    ctx.textAlign = 'center';
+    const title = modal.querySelector('#cmTitle').value.trim() || 'Başlıksız';
+    let size = 52;
+    ctx.font = `bold ${size}px Georgia, serif`;
+    while (size > 22 && ctx.measureText(title).width > w - 50) { size -= 4; ctx.font = `bold ${size}px Georgia, serif`; }
+    const words = title.split(' ');
+    const lines = [];
+    let line = '';
+    words.forEach(word => {
+      const test = line ? `${line} ${word}` : word;
+      if (ctx.measureText(test).width > w - 50 && line) { lines.push(line); line = word; } else line = test;
+    });
+    if (line) lines.push(line);
+    const ty = h * 0.52;
+    lines.slice(0, 4).forEach((l, i) => ctx.fillText(l, w / 2, ty + i * (size + 10)));
+    const author = modal.querySelector('#cmAuthor').value.trim();
+    ctx.font = '26px Georgia, serif';
+    if (author) ctx.fillText(author, w / 2, h - 60);
+  };
+  ['cmTitle', 'cmAuthor', 'cmEmoji'].forEach(id => modal.querySelector('#' + id).addEventListener('input', draw));
+  modal.querySelectorAll('.cm-swatch').forEach(btn => btn.addEventListener('click', () => {
+    palette = PALETTES[Number(btn.dataset.i)];
+    modal.querySelectorAll('.cm-swatch').forEach(b => b.style.borderColor = 'transparent');
+    btn.style.borderColor = '#fff';
+    draw();
+  }));
+  modal.querySelector('.cm-swatch').style.borderColor = '#fff';
+  draw();
+  modal.querySelector('#cmUse').addEventListener('click', () => {
+    canvas.toBlob(blob => {
+      if (!blob) return setSettingsMessage(document.getElementById('cmMessage'), 'Kapak oluşturulamadı.', true);
+      const file = new File([blob], 'kapak.png', { type: 'image/png' });
+      const input = document.getElementById('bookCover');
+      const dt = new DataTransfer();
+      dt.items.add(file);
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      close();
+    }, 'image/png');
+  });
+}
+
 async function compressImage(file, maxDim = 1920, quality = 0.82) {
   if (!file || !/^image\/(jpeg|png|webp)$/.test(file.type)) return file;
   try {
@@ -3624,6 +3977,7 @@ function openMiniPlayer(src, title, href) {
       <button class="mp-toggle" type="button" aria-label="Oynat / duraklat">❚❚</button>
       <div class="mp-info"><a class="mp-title" href="${esc(href || '#')}">${esc(title || 'Parça')}</a><span class="mp-time small">0:00</span></div>
       <input class="mp-seek" type="range" min="0" max="1000" value="0" aria-label="Konum">
+      <button class="mp-next" type="button" aria-label="Sonraki parça" title="Sonraki parça">⏭</button>
       <button class="mp-close" type="button" aria-label="Kapat">✕</button>`;
     document.body.appendChild(bar);
     state.bar = bar;
@@ -3636,7 +3990,8 @@ function openMiniPlayer(src, title, href) {
       if (state.audio.duration) seek.value = Math.round(state.audio.currentTime / state.audio.duration * 1000);
     };
     state.audio.addEventListener('timeupdate', sync);
-    state.audio.addEventListener('ended', closeMiniPlayer);
+    state.audio.addEventListener('ended', () => { if (!playNextInQueue()) closeMiniPlayer(); });
+    bar.querySelector('.mp-next').addEventListener('click', playNextInQueue);
     toggle.addEventListener('click', () => { state.audio.paused ? state.audio.play().catch(() => {}) : state.audio.pause(); toggle.textContent = state.audio.paused ? '▶' : '❚❚'; });
     seek.addEventListener('input', () => { if (state.audio.duration) state.audio.currentTime = seek.value / 1000 * state.audio.duration; });
     bar.querySelector('.mp-close').addEventListener('click', closeMiniPlayer);
@@ -3649,6 +4004,17 @@ function openMiniPlayer(src, title, href) {
   state.audio.play().catch(() => {});
   state.bar.querySelector('.mp-toggle').textContent = '❚❚';
 }
+function playNextInQueue() {
+  const state = miniPlayerState;
+  const els = [...document.querySelectorAll('audio[data-mp-title]')];
+  if (!els.length) return false;
+  const idx = els.findIndex(el => (el.currentSrc || el.src) === state.audio?.src);
+  const next = els[(idx + 1)] || els[0];
+  if (!next || (idx === -1 && els.length === 1)) return false;
+  openMiniPlayer(next.currentSrc || next.src, next.dataset.mpTitle, next.dataset.mpHref);
+  return true;
+}
+
 function closeMiniPlayer() {
   const state = miniPlayerState;
   state.audio?.pause();
@@ -3698,7 +4064,7 @@ function postCard(post, profileMap = {}) {
       <h3><a href="#/read/${encodeURIComponent(post.id)}">${esc(post.title || 'Başlıksız eser')}</a></h3>
       <div class="post-tags">${hashtagHTML(post)}</div>
       <p>${esc(post.description || '')}</p>
-      <div class="meta">${writing ? 'Yazar' : 'Paylaşan'}: <a href="#/user/${encodeURIComponent(post.author_id)}">${esc(displayName(profileMap[post.author_id]))}</a></div>
+      <div class="meta">${writing ? 'Yazar' : 'Paylaşan'}: ${post.pen_name ? `<span title="Kalem adı">✒️ ${esc(post.pen_name)}</span>` : `<a href="#/user/${encodeURIComponent(post.author_id)}">${esc(displayName(profileMap[post.author_id]))}</a>`}</div>
     </article>`;
 }
 
@@ -3924,7 +4290,7 @@ async function renderDiscover(query = '') {
       <div class="quick-feed" tabindex="0" aria-label="Hızlı keşfet akışı">${posts.map((post, index) => `<article class="quick-card" data-index="${index}" data-post-id="${esc(post.id)}">
         <div class="quick-visual">${quickVisualHTML(post)}<div class="quick-shade"></div></div>
         <div class="quick-overlay">
-          <div class="quick-copy"><div class="quick-kind">${esc(quickTypeLabel(post))} · ${esc(formatDate(post.created_at))}</div><h2>${esc(post.title || 'Başlıksız eser')}</h2><div class="post-tags">${hashtagHTML(post)}</div>${post.type && post.type !== 'writing' ? `<p>${esc((post.description || '').slice(0, 220))}</p>` : ''}<a class="quick-author" href="#/user/${encodeURIComponent(post.author_id)}">@${esc(profiles[post.author_id]?.username || displayName(profiles[post.author_id]))}</a></div>
+          <div class="quick-copy"><div class="quick-kind">${esc(quickTypeLabel(post))} · ${esc(formatDate(post.created_at))}</div><h2>${esc(post.title || 'Başlıksız eser')}</h2><div class="post-tags">${hashtagHTML(post)}</div>${post.type && post.type !== 'writing' ? `<p>${esc((post.description || '').slice(0, 220))}</p>` : ''}${post.pen_name ? `<span class="quick-author" title="Kalem adı">✒️ ${esc(post.pen_name)}</span>` : `<a class="quick-author" href="#/user/${encodeURIComponent(post.author_id)}">@${esc(profiles[post.author_id]?.username || displayName(profiles[post.author_id]))}</a>`}</div>
           <div class="quick-actions"><button class="quick-action quick-like ${likedPostIds.has(post.id) ? 'liked' : ''}" data-post-id="${esc(post.id)}" type="button" aria-label="Beğen" aria-pressed="${likedPostIds.has(post.id)}"><span>${likedPostIds.has(post.id) ? '♥' : '♡'}</span><small>${likeCounts[post.id] || 0}</small></button><button class="quick-action quick-comment-toggle" data-post-id="${esc(post.id)}" type="button" aria-label="Yorumlar"><span>▢</span><small>${commentCounts[post.id] || 0}</small></button>${saveButtonHTML(post.id, savedPostIds.has(post.id))}<a class="quick-action" href="#/chat?share=${encodeURIComponent(post.id)}" title="Sohbette paylaş"><span>✉</span><small>Gönder</small></a><a class="quick-action primary" href="#/read/${encodeURIComponent(post.id)}"><span>↗</span><small>Aç</small></a></div>
         </div>
       </article>`).join('')}</div>
@@ -5114,6 +5480,7 @@ async function route() {
     clearInterval(communityPollTimer); communityPollTimer = null;
     if (communityRealtime) { sb?.removeChannel(communityRealtime); communityRealtime = null; }
   }
+  if (view !== 'relay' && relayRealtime) { sb?.removeChannel(relayRealtime); relayRealtime = null; }
   if (readScrollHandler) { window.removeEventListener('scroll', readScrollHandler); readScrollHandler = null; }
   stopCameraStream();
   window.scrollTo(0, 0);
@@ -5149,6 +5516,7 @@ async function route() {
   if (view === 'topluluk') return renderCommunity(safeDecode(arg), query);
   if (view === 'koleksiyonlar') return renderCollections();
   if (view === 'ozet') return renderOzet();
+  if (view === 'relay') return arg ? renderRelay(safeDecode(arg)) : renderRelayList();
   if (view === 'user') return renderProfile(safeDecode(arg));
   return renderHome();
 }
@@ -5166,6 +5534,7 @@ const helperPageTips = {
   'notifications': 'Bildirimler sayfasındasın: beğeni, yorum, takip, mesaj ve rozet haberlerin burada.',
   'topluluk': 'Topluluk sayfasındasın: kanallar arasında gez, önemli mesajlar sabitlenmiş olabilir.',
   'koleksiyonlar': 'Koleksiyon sayfasındasın: kaydettiğin eserleri tematik listelerde topla.',
+  'relay': 'Nöbetleşe hikâyedesin: iki kişi sırayla paragraf yazarsınız. Sıra sendeyken alt kısımdan devamını yazabilirsin.',
   'ozet': 'Halka Özetin sayfasındasın: bu yılki üretiminin rakamları burada.',
   'admin': 'Yönetim panelindesin: raporlar, bayraklar, istatistikler ve rozet verme araçları burada.'
 };
