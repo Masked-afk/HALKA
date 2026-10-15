@@ -299,8 +299,10 @@ function openBadgeModal(info) {
 }
 
 function writingKindLabel(kind) {
-  return ({ blog: 'Blog', short: 'Kısa Yazı', book: 'Kitap', story: 'Kitap', poem: 'Şiir' })[kind] || 'Yazı';
+  return ({ blog: 'Blog', short: 'Kısa Yazı', book: 'Kitap', story: 'Kitap', poem: 'Şiir', manga: 'Manga', light_novel: 'Light Novel' })[kind] || 'Yazı';
 }
+const CHAPTERED_KINDS = new Set(['book', 'story', 'manga', 'light_novel']);
+function isChapteredKind(kind) { return CHAPTERED_KINDS.has(kind); }
 function tagSlug(value) {
   return String(value || '').trim().replace(/^#+/, '').toLocaleLowerCase('tr-TR').replace(/\s+/g, '_').replace(/[^\p{L}\p{N}_]/gu, '').slice(0, 24);
 }
@@ -1493,6 +1495,8 @@ function renderWrite() {
             <option value="blog">Blog</option>
             <option value="short">Kısa Yazı</option>
             <option value="book">Kitap</option>
+            <option value="manga">Manga</option>
+            <option value="light_novel">Light Novel</option>
           </select>
         </div>
         <div class="field">
@@ -1543,6 +1547,22 @@ function renderWrite() {
       chapterLabel: 'Bölüm adı', chapterPlaceholder: '1. Bölüm', bodyLabel: 'İlk bölüm metni',
       bodyPlaceholder: 'Açılış sahnesini kur; karakterleri ve dünyayı okura tanıt…',
       starter: 'Açılış sahnesi:\n\nKarakterler ve mekân:\n\nBölümün sonunda merak unsuru:'
+    },
+    manga: {
+      title: 'Manga adı', titlePlaceholder: 'Manganın adını yaz…',
+      description: 'Manga tanıtımı', descriptionPlaceholder: 'Manganın konusunu, kahramanını ve tonunu birkaç cümleyle anlat…',
+      heading: 'İlk bölüm', help: 'Manga için:\n1. Ad ve kısa tanıtım ekle.\n2. İstersen kapak yükle veya oluşturucuyla tasarla.\n3. Bölümleri senaryo/öykü metni olarak yaz.\n4. Yayımladıktan sonra yeni bölümler ekleyebilirsin.\n\nBiçim: **kalın**, (italik).',
+      chapterLabel: 'Bölüm adı', chapterPlaceholder: '1. Bölüm', bodyLabel: 'İlk bölüm metni',
+      bodyPlaceholder: 'Sahne sahne anlat; panel tasvirleri ve diyaloglarla ilerle…',
+      starter: 'Açılış paneli / sahne:\n\nKarakterler:\n\nBölüm sonu kancası:'
+    },
+    light_novel: {
+      title: 'Light novel adı', titlePlaceholder: 'Eserinin adını yaz…',
+      description: 'Tanıtım', descriptionPlaceholder: 'Arka kapak tadında kısa bir tanıtım yaz…',
+      heading: 'İlk bölüm', help: 'Light novel için:\n1. Ad ve kısa tanıtım ekle.\n2. İstersen kapak yükle veya oluşturucuyla tasarla.\n3. İlk bölümün adını ve metnini yaz.\n4. Yayımladıktan sonra yeni bölümler ekleyebilirsin.\n\nBiçim: **kalın**, (italik).',
+      chapterLabel: 'Bölüm adı', chapterPlaceholder: '1. Bölüm', bodyLabel: 'İlk bölüm metni',
+      bodyPlaceholder: 'Kahramanın bakış açısından sahneyi kur; içses ve diyalog dengesini tut…',
+      starter: 'Açılış sahnesi:\n\nKahraman ve dünya:\n\nBölüm sonu kancası:'
     }
   };
   const applyWritingTemplate = kind => {
@@ -1553,8 +1573,8 @@ function renderWrite() {
     document.getElementById('description').placeholder = t.descriptionPlaceholder;
     document.getElementById('writingBodyHeading').textContent = t.heading;
     document.getElementById('writingTemplateHelp').textContent = t.help;
-    document.getElementById('bookCoverField').hidden = kind !== 'book';
-    document.getElementById('chapterTools').hidden = kind !== 'book';
+    document.getElementById('bookCoverField').hidden = !isChapteredKind(kind);
+    document.getElementById('chapterTools').hidden = !isChapteredKind(kind);
     document.querySelector('label[for="chapter_title"]').textContent = t.chapterLabel;
     document.getElementById('chapter_title').placeholder = t.chapterPlaceholder;
     document.querySelector('label[for="chapter_body"]').textContent = t.bodyLabel;
@@ -1603,7 +1623,7 @@ function renderWrite() {
     submit.textContent = 'Yayımlanıyor…';
     try {
       let coverPath = null;
-      if (kind === 'book' && coverFile) {
+      if (isChapteredKind(kind) && coverFile) {
         const extension = ({ 'image/jpeg':'jpg', 'image/png':'png', 'image/webp':'webp' })[coverFile.type];
         if (!extension || coverFile.size > 5 * 1024 * 1024) { showMessage('Kapak JPG, PNG veya WebP olmalı ve 5 MB sınırını aşmamalı.', true); return; }
         coverFile = await compressImage(coverFile, 1280);
@@ -1631,7 +1651,7 @@ function renderWrite() {
       if (chapterBody) {
         const { error: chapterError } = await sb.from('chapters').insert({
           post_id: post.id, position: 1,
-          title: chapterTitle || (String(form.get('kind')) === 'book' ? '1. Bölüm' : String(form.get('kind')) === 'short' ? 'Metin' : 'Yazı'),
+          title: chapterTitle || (isChapteredKind(String(form.get('kind'))) ? '1. Bölüm' : String(form.get('kind')) === 'short' ? 'Metin' : 'Yazı'),
           body: chapterBody
         });
         if (chapterError) {
@@ -2020,7 +2040,7 @@ async function renderRead(id, query = '') {
       return `
       <section class="chapter" id="chapter-${i}" data-chapter-index="${i}">
         <h3>${esc(ch.title || 'Bölüm')}</h3>
-        <div class="chapter-body">${renderParagraphs(ch.body || '', ch.id, paragraphCounts[ch.id] || {}, post.kind === 'book')}</div>
+        <div class="chapter-body">${renderParagraphs(ch.body || '', ch.id, paragraphCounts[ch.id] || {}, isChapteredKind(post.kind))}</div>
         <div class="chapter-comments">
           <button class="chapter-comments-toggle" data-chapter="${esc(ch.id)}" type="button">💬 Bölüm yorumları (<span>${chComments.length}</span>)</button>
           <div class="chapter-comments-panel" hidden>
@@ -2063,7 +2083,7 @@ async function renderRead(id, query = '') {
           </div>
           <div class="field">
             <label for="cbody">Metin</label>
-            ${post.kind === 'book' ? '<div class="rich-tools" id="newChapterTools"><button class="btn ghost small" type="button" data-wrap="**">Kalın: **…**</button><button class="btn ghost small" type="button" data-wrap="()">İtalik: (…)</button></div>' : ''}
+            ${isChapteredKind(post.kind) ? '<div class="rich-tools" id="newChapterTools"><button class="btn ghost small" type="button" data-wrap="**">Kalın: **…**</button><button class="btn ghost small" type="button" data-wrap="()">İtalik: (…)</button></div>' : ''}
             <textarea id="cbody" name="cbody" required></textarea>
           </div>
           <button class="btn primary" type="submit">Bölümü ekle</button>
@@ -2292,7 +2312,7 @@ async function renderRead(id, query = '') {
 
   if (!isOwner) return;
 
-  if (post.kind === 'book') bindRichTextTools(document.getElementById('newChapterTools'), document.getElementById('cbody'));
+  if (isChapteredKind(post.kind)) bindRichTextTools(document.getElementById('newChapterTools'), document.getElementById('cbody'));
   document.getElementById('chapterForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const form = new FormData(e.target);
@@ -3962,7 +3982,7 @@ function setSettingsMessage(element, text, error = false) {
 
 const SECTIONS = {
   yazilar: { label: 'Yazılar', type: 'writing', groups: [
-    { title: 'Yazı türü', param: 'kind', items: [['Blog', 'blog'], ['Kısa Yazı', 'short'], ['Kitap', 'book']] },
+    { title: 'Yazı türü', param: 'kind', items: [['Blog', 'blog'], ['Kısa Yazı', 'short'], ['Kitap', 'book'], ['Manga', 'manga'], ['Light Novel', 'light_novel']] },
     { title: 'Hashtag', param: 'cat', items: categories.filter(c => c !== 'Diğer').map(c => [c, tagSlug(c)]) }
   ]},
   cizimler: { label: 'Çizimler', type: 'drawing', groups: [
@@ -3987,7 +4007,7 @@ const SECTIONS = {
 };
 
 const CREATE_MENU = [
-  { label: 'Yazı', items: [['Blog', '#/write?kind=blog'], ['Kısa Yazı', '#/write?kind=short'], ['Kitap', '#/write?kind=book'], ['⚡ Nöbetleşe hikâye', '#/relay']] },
+  { label: 'Yazı', items: [['Blog', '#/write?kind=blog'], ['Kısa Yazı', '#/write?kind=short'], ['Kitap', '#/write?kind=book'], ['Manga', '#/write?kind=manga'], ['Light Novel', '#/write?kind=light_novel'], ['⚡ Nöbetleşe hikâye', '#/relay']] },
   { label: 'Çizim', items: [['Tuvalde çiz', '#/create/drawing?mode=canvas'], ['Dosya yükle', '#/create/drawing?mode=file']] },
   { label: 'Fotoğraf', items: [['Kamerayla çek', '#/create/photo?mode=camera'], ['Galeriden seç', '#/create/photo?mode=file']] },
   { label: 'Video', items: [['Kamerayla kaydet', '#/create/video?mode=camera'], ['Dosya yükle', '#/create/video?mode=file']] },
@@ -4412,7 +4432,7 @@ function quickVisualHTML(post) {
   if (post.type === 'music' && /^https?:\/\//.test(post.media_url || '')) {
     return `<div class="quick-music"><div class="quick-music-note">♪</div>${musicEmbedHTML(post.media_url)}</div>`;
   }
-  if (post.kind === 'book' || post.cover_signed_url) {
+  if (isChapteredKind(post.kind) || post.cover_signed_url) {
     return `<div class="quick-book">${post.cover_signed_url ? `<img src="${esc(post.cover_signed_url)}" alt="${esc(post.title || 'Kitap')} kapağı">` : '<div class="quick-book-placeholder">Kitap</div>'}<div><span class="eyebrow">Yazarın özeti</span><p>${esc(post.description || 'Yazar bu kitap için henüz bir özet eklememiş.')}</p></div></div>`;
   }
   const writingText = post.quick_body || post.description || post.title || 'Yeni bir eser seni bekliyor.';
