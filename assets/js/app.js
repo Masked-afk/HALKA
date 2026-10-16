@@ -5535,8 +5535,18 @@ function renderCreateMedia(type, mode) {
               <button class="btn ghost small" id="canvasClear" type="button">Temizle</button>
             </div>
             <div class="canvas-tool-row"><label class="small">Zemin</label><div class="color-row" id="bgColors"></div><input type="color" id="bgCustom" class="color-custom" value="#f4f0e8" title="Zemin rengi seç"></div>
+            <div class="canvas-tool-row">
+              <button class="btn ghost small" id="refAddBtn" type="button">🖼 Referans ekle</button>
+              <input id="refFile" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+              <label class="small" id="refOpacityWrap" hidden>Opaklık <input type="range" id="refOpacity" min="10" max="100" value="100" style="width:80px"></label>
+              <button class="btn ghost small" id="refRemoveBtn" type="button" hidden>Referansı kaldır</button>
+              <span class="small" id="refHint" hidden>Paneli sürükleyerek taşıyabilirsin — tuvale işlenmez.</span>
+            </div>
           </div>
-          <canvas id="drawCanvas" class="draw-canvas" width="1200" height="800"></canvas>
+          <div class="draw-wrap">
+            <canvas id="drawCanvas" class="draw-canvas" width="1200" height="800"></canvas>
+            <div id="refPanel" class="ref-panel" hidden><img id="refImg" alt="Referans görsel" draggable="false"></div>
+          </div>
         </div>` : ''}
         ${modeKey === 'camera' ? `
         <div class="field">
@@ -5621,6 +5631,40 @@ function renderCreateMedia(type, mode) {
       document.querySelectorAll('.canvas-tool').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
     };
     document.querySelectorAll('.canvas-tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+    // Referans paneli: tuvale işlenmez, sürüklenebilir, opaklığı ayarlanır
+    const refPanel = document.getElementById('refPanel');
+    const refImg = document.getElementById('refImg');
+    document.getElementById('refAddBtn').addEventListener('click', () => document.getElementById('refFile').click());
+    document.getElementById('refFile').addEventListener('change', e => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      refImg.src = URL.createObjectURL(f);
+      refPanel.hidden = false;
+      ['refOpacityWrap', 'refRemoveBtn', 'refHint'].forEach(el => document.getElementById(el).hidden = false);
+      markDraftDirty('drawing');
+    });
+    document.getElementById('refOpacity').addEventListener('input', e => { refImg.style.opacity = e.target.value / 100; });
+    document.getElementById('refRemoveBtn').addEventListener('click', () => {
+      refPanel.hidden = true;
+      document.getElementById('refFile').value = '';
+      ['refOpacityWrap', 'refRemoveBtn', 'refHint'].forEach(el => document.getElementById(el).hidden = true);
+    });
+    let refDrag = null;
+    refPanel.addEventListener('pointerdown', e => {
+      const wr = refPanel.parentElement.getBoundingClientRect();
+      refDrag = { dx: e.clientX - refPanel.offsetLeft - wr.left, dy: e.clientY - refPanel.offsetTop - wr.top };
+      refPanel.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    refPanel.addEventListener('pointermove', e => {
+      if (!refDrag) return;
+      const wr = refPanel.parentElement.getBoundingClientRect();
+      const x = Math.max(0, Math.min(wr.width - refPanel.offsetWidth, e.clientX - wr.left - refDrag.dx));
+      const y = Math.max(0, Math.min(wr.height - refPanel.offsetHeight, e.clientY - wr.top - refDrag.dy));
+      refPanel.style.left = x + 'px'; refPanel.style.top = y + 'px'; refPanel.style.right = 'auto';
+    });
+    refPanel.addEventListener('pointerup', () => { refDrag = null; });
 
     const pos = e => {
       const r = canvas.getBoundingClientRect();
