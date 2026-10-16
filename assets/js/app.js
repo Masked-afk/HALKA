@@ -4063,7 +4063,8 @@ async function renderNotifications() {
     message: 'sana mesaj gönderdi',
     follow: 'seni takip etmeye başladı',
     new_post: 'yeni bir eser paylaştı',
-    relay: 'nöbetleşe hikâyede seni bekliyor'
+    relay: 'nöbetleşe hikâyede seni bekliyor',
+    continuation: 'devam önerini bölüm olarak yayınladı 🎉'
   };
   const targetFor = n => {
     if (n.type === 'badge') return '#/profile';
@@ -5466,7 +5467,7 @@ async function renderDiscover(query = '') {
   const myHash = location.hash;
   app.innerHTML = `
     <section class="hero" style="padding-bottom:8px"><div class="eyebrow">Halka · Keşfet</div><h1>${quick ? 'Hızlı keşfet' : 'Keşfet'}</h1><p class="subtitle">${quick ? 'Yeni eserleri kaydırarak gözden geçir.' : 'İlham veren yazıları, görselleri, videoları ve müzikleri bul.'}</p></section>
-    <div class="discover-switch"><a class="${!quick ? 'on' : ''}" href="#/section/kesfet${themeId ? `?theme=${encodeURIComponent(themeId)}` : ''}">Keşfet sayfası</a><a class="${quick ? 'on' : ''}" href="#/section/kesfet?sub=hizli${themeId ? `&theme=${encodeURIComponent(themeId)}` : ''}">Hızlı keşfet</a></div>
+    <div class="discover-switch"><a class="${!quick ? 'on' : ''}" href="#/section/kesfet${themeId ? `?theme=${encodeURIComponent(themeId)}` : ''}">Keşfet sayfası</a><a class="${quick ? 'on' : ''}" href="#/section/kesfet?sub=hizli${themeId ? `&theme=${encodeURIComponent(themeId)}` : ''}">Hızlı keşfet</a><a href="#/ayin-halkasi">🏆 Ayın Halka'sı</a><a href="#/meydan-okuma">⚡ Meydan okuma</a><a href="#/kritik">🎯 Kritik</a></div>
     ${themeInfo ? `<div class="card theme-card" style="margin-bottom:14px"><div class="eyebrow">🎨 Tema filtresi</div><strong>${esc(themeInfo.title || 'Tema')}</strong> <a class="small" href="#/section/kesfet">filtreyi kaldır</a></div>` : ''}
     <div class="chips">${filters.map(([label,type]) => `<a class="chip ${selected === type ? 'on' : ''}" href="${linkFor(type)}">${label}</a>`).join('')}</div>
     <div id="discoverFeed">${loadingBlock('Eserler yükleniyor…')}</div>`;
@@ -6996,6 +6997,235 @@ async function renderCommunity(id, query = '') {
   }
 }
 
+async function renderCritique() {
+  if (!currentUser) { location.hash = '#/auth?login'; return; }
+  app.innerHTML = loadingBlock('Kritik eşleşmesi yükleniyor…');
+  const { data: matches, error } = await sb.from('critique_matches').select('*').eq('critic_id', currentUser.id).order('created_at', { ascending: false });
+  if (error) { app.innerHTML = `<div class="empty">Eşleşmeler yüklenemedi.<br><span class="small">${esc(error.message)}</span></div>`; return; }
+  const list = matches || [];
+  const pending = list.filter(m => !m.done_at);
+  const done = list.filter(m => m.done_at);
+  const postIds = list.map(m => m.post_id);
+  const { data: mps } = postIds.length ? await sb.from('posts').select('id,title,type,kind,author_id,description').in('id', postIds) : { data: [] };
+  const pMap = Object.fromEntries((mps || []).map(p => [p.id, p]));
+  const authorIds = [...new Set((mps || []).map(p => p.author_id))];
+  const { data: aps } = authorIds.length ? await sb.from('profiles').select('id,username,display_name').in('id', authorIds) : { data: [] };
+  const aMap = Object.fromEntries((aps || []).map(a => [a.id, a]));
+  const openCountRes = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('critique_wanted', true).neq('author_id', currentUser.id);
+  const typeIcon = { writing: '✍️', drawing: '🎨', photo: '📷', video: '🎬', music: '🎵' };
+
+  app.innerHTML = `
+    <section class="hero">
+      <div class="eyebrow">🎯 Kritik Eşleşmesi</div>
+      <h1>Eleştirmen ol</h1>
+      <p class="subtitle">"Eleştiri istiyorum" diyen eserlerden rastgele birini çek; oku, yorumla, tamamla. Şu an ${openCountRes.count || 0} eser kritik bekliyor.</p>
+      <div class="post-actions" style="justify-content:center">
+        <button class="btn primary" id="critDrawBtn" type="button" ${pending.length >= 3 ? 'disabled' : ''}>🎲 Eşleşme çek</button>
+        ${pending.length >= 3 ? '<span class="small">Aynı anda en fazla 3 açık görev — önce birini tamamla.</span>' : ''}
+      </div>
+    </section>
+    ${pending.length ? `<section class="card"><div class="section-head"><h2>Açık görevlerin (${pending.length})</h2></div>
+      ${pending.map(m => {
+        const p = pMap[m.post_id];
+        if (!p) return '';
+        return `<div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
+          <a class="post-card-title" href="#/read/${encodeURIComponent(p.id)}">${typeIcon[p.type || 'writing'] || '✍️'} ${esc(p.title || 'Başlıksız eser')}</a>
+          <div class="small">${esc(quickTypeLabel(p))} · <a href="#/user/${encodeURIComponent(p.author_id)}">${esc(displayName(aMap[p.author_id], 'Halka üyesi'))}</a>${p.description ? ` · ${esc(p.description.slice(0, 100))}` : ''}</div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <a class="btn primary small" href="#/read/${encodeURIComponent(p.id)}">Eseri oku ve eleştir</a>
+            <button class="btn ghost small crit-done" data-match="${esc(m.id)}" type="button">✓ Eleştirimi yazdım</button>
+          </div>
+        </div>`;
+      }).join('')}
+      <p class="small">İpucu: eleştiriyi eserin yorumuna yaz — yazar oradan okur. Yapıcı ve somut ol: ne işe yaradı, ne geliştirilebilir?</p>
+    </section>` : '<section class="card"><div class="empty">Açık görevin yok. Yukarıdan bir eşleşme çek!</div></section>'}
+    ${done.length ? `<section class="card"><div class="section-head"><h2>Tamamlananlar (${done.length})</h2></div>
+      ${done.slice(0, 10).map(m => {
+        const p = pMap[m.post_id];
+        return p ? `<div class="collection-item-row"><a href="#/read/${encodeURIComponent(p.id)}">${typeIcon[p.type || 'writing'] || '✍️'} ${esc(p.title || 'Başlıksız eser')}</a><span class="small">✅ ${esc(formatDate(m.done_at))}</span></div>` : '';
+      }).join('')}</section>` : ''}`;
+
+  document.getElementById('critDrawBtn')?.addEventListener('click', async () => {
+    const { data: candidates } = await sb.from('posts').select('id').eq('critique_wanted', true).neq('author_id', currentUser.id).limit(100);
+    const already = new Set(list.map(m => m.post_id));
+    const pool = (candidates || []).filter(c => !already.has(c.id));
+    if (!pool.length) return alert('Şu an eşleşebileceğin yeni eser yok — daha sonra tekrar dene.');
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    const { error: iErr } = await sb.from('critique_matches').insert({ post_id: pick.id, critic_id: currentUser.id });
+    if (iErr) return alert('Eşleşme yapılamadı: ' + iErr.message);
+    renderCritique();
+  });
+  app.querySelectorAll('.crit-done').forEach(btn => btn.addEventListener('click', async () => {
+    await sb.from('critique_matches').update({ done_at: new Date().toISOString() }).eq('id', btn.dataset.match).eq('critic_id', currentUser.id);
+    renderCritique();
+  }));
+}
+
+async function renderChallenges() {
+  app.innerHTML = loadingBlock('Meydan okumalar yükleniyor…');
+  const { data: chs, error } = await sb.from('challenges').select('*').order('starts_at', { ascending: false }).limit(30);
+  if (error) { app.innerHTML = `<div class="empty">Meydan okumalar yüklenemedi.<br><span class="small">${esc(error.message)}</span></div>`; return; }
+  const now = Date.now();
+  const list = chs || [];
+  const active = list.filter(c => now >= +new Date(c.starts_at) && now <= +new Date(c.ends_at));
+  const upcoming = list.filter(c => now < +new Date(c.starts_at));
+  const ended = list.filter(c => now > +new Date(c.ends_at));
+
+  const { data: entries } = list.length ? await sb.from('challenge_entries').select('challenge_id,post_id,user_id,created_at').in('challenge_id', list.map(c => c.id)) : { data: [] };
+  const entriesByCh = new Map();
+  (entries || []).forEach(e => { if (!entriesByCh.has(e.challenge_id)) entriesByCh.set(e.challenge_id, []); entriesByCh.get(e.challenge_id).push(e); });
+  const entryPostIds = [...new Set((entries || []).map(e => e.post_id))];
+  const entryUserIds = [...new Set((entries || []).map(e => e.user_id))];
+  const [{ data: eps }, { data: eus }] = await Promise.all([
+    entryPostIds.length ? sb.from('posts').select('id,title,type,kind').in('id', entryPostIds) : { data: [] },
+    entryUserIds.length ? sb.from('profiles').select('id,username,display_name').in('id', entryUserIds) : { data: [] }
+  ]);
+  const pMap = Object.fromEntries((eps || []).map(p => [p.id, p]));
+  const uMap = Object.fromEntries((eus || []).map(u => [u.id, u]));
+  const myPostIds = [...new Set(list.flatMap(c => []))];
+
+  let myPosts = [];
+  if (currentUser && active.length) {
+    const { data: mp } = await sb.from('posts').select('id,title,type,kind,created_at').eq('author_id', currentUser.id).order('created_at', { ascending: false }).limit(60);
+    myPosts = mp || [];
+  }
+  const myEntries = new Set((entries || []).filter(e => e.user_id === currentUser?.id).map(e => `${e.challenge_id}:${e.post_id}`));
+
+  const timeLeft = end => {
+    const ms = +new Date(end) - now;
+    const h = Math.floor(ms / 3600000), d = Math.floor(h / 24);
+    return d > 0 ? `${d} gün ${h % 24} saat kaldı` : h > 0 ? `${h} saat ${Math.floor((ms % 3600000) / 60000)} dk kaldı` : `${Math.max(1, Math.floor(ms / 60000))} dk kaldı`;
+  };
+  const typeIcon = { writing: '✍️', drawing: '🎨', photo: '📷', video: '🎬', music: '🎵' };
+
+  const card = (c, mode) => {
+    const es = entriesByCh.get(c.id) || [];
+    const eligible = mode === 'active' && currentUser
+      ? myPosts.filter(p => +new Date(p.created_at) >= +new Date(c.starts_at) && +new Date(p.created_at) <= +new Date(c.ends_at) && !myEntries.has(`${c.id}:${p.id}`))
+      : [];
+    return `<section class="card">
+      <div class="section-head"><h2>⚡ ${esc(c.title)}</h2>${isCurrentUserAdmin ? `<button class="btn ghost small ch-del" data-ch="${esc(c.id)}" type="button">Sil</button>` : ''}</div>
+      ${c.prompt ? `<p>${esc(c.prompt)}</p>` : ''}
+      ${c.goal ? `<p class="small">🎯 Hedef: ${esc(c.goal)}</p>` : ''}
+      <p class="small">${mode === 'active' ? `⏳ ${timeLeft(c.ends_at)}` : mode === 'upcoming' ? `Başlangıç: ${esc(formatDate(c.starts_at))}` : `Bitti: ${esc(formatDate(c.ends_at))}`} · ${es.length} katılım</p>
+      ${mode === 'active' && currentUser ? (eligible.length ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
+        <select id="entryPick-${esc(c.id)}" style="flex:1;min-width:180px">${eligible.map(p => `<option value="${esc(p.id)}">${esc(p.title || 'Başlıksız')} (${esc(quickTypeLabel(p))})</option>`).join('')}</select>
+        <button class="btn primary small entry-add" data-ch="${esc(c.id)}" type="button">Eserimi gönder</button>
+      </div>` : '<p class="small" style="margin:8px 0">Katılmak için pencere içinde yayınladığın bir eser gerekli — yeni bir eser yayınla ve buradan gönder.</p>') : ''}
+      ${es.length ? `<div class="post-list" style="margin-top:8px">${es.map(e => {
+        const p = pMap[e.post_id], u = uMap[e.user_id];
+        if (!p) return '';
+        return `<div class="collection-item-row"><a href="#/read/${encodeURIComponent(p.id)}">${typeIcon[p.type || 'writing'] || '✍️'} ${esc(p.title || 'Başlıksız eser')}</a><span class="small">· <a href="#/user/${encodeURIComponent(e.user_id)}">${esc(displayName(u, 'Halka üyesi'))}</a></span></div>`;
+      }).join('')}</div>` : '<div class="empty small" style="margin-top:8px">Henüz katılım yok — ilk sen ol!</div>'}
+    </section>`;
+  };
+
+  app.innerHTML = `
+    <section class="hero">
+      <div class="eyebrow">⚡ Üretim Meydan Okumaları</div>
+      <h1>Süreye karşı üret</h1>
+      <p class="subtitle">Süreli görevler: pencere içinde eserini yayınla, gönder, ⚡ Meydan Okuyucu rozetini kap.</p>
+    </section>
+    ${isCurrentUserAdmin ? `<section class="card">
+      <div class="section-head"><h2>Yeni meydan okuma</h2></div>
+      <form id="challengeForm">
+        <div class="field"><input name="title" required maxlength="80" placeholder="Başlık (örn. 24 Saatte 500 Kelime)"></div>
+        <div class="field"><input name="prompt" maxlength="400" placeholder="Açıklama / ilham cümlesi (isteğe bağlı)"></div>
+        <div class="field"><input name="goal" maxlength="120" placeholder="Hedef (örn. en az 500 kelime, tek sayfa çizim)"></div>
+        <div class="field"><select name="hours"><option value="24">24 saat</option><option value="72" selected>3 gün</option><option value="168">1 hafta</option><option value="336">2 hafta</option></select></div>
+        <button class="btn primary" type="submit">Başlat</button>
+      </form>
+    </section>` : ''}
+    ${active.length ? `<h3 style="margin:18px 0 10px">🔥 Aktif</h3>${active.map(c => card(c, 'active')).join('')}` : ''}
+    ${upcoming.length ? `<h3 style="margin:18px 0 10px">📅 Yaklaşan</h3>${upcoming.map(c => card(c, 'upcoming')).join('')}` : ''}
+    ${ended.length ? `<h3 style="margin:18px 0 10px">📜 Geçmiş</h3>${ended.map(c => card(c, 'ended')).join('')}` : ''}
+    ${!list.length ? '<div class="empty">Henüz meydan okuma açılmamış.</div>' : ''}`;
+
+  document.getElementById('challengeForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = e.target;
+    const { error: cErr } = await sb.from('challenges').insert({
+      title: f.title.value.trim(), prompt: f.prompt.value.trim() || null, goal: f.goal.value.trim() || null,
+      created_by: currentUser.id, ends_at: new Date(Date.now() + Number(f.hours.value) * 3600000).toISOString()
+    });
+    if (cErr) return alert('Oluşturulamadı: ' + cErr.message);
+    renderChallenges();
+  });
+  app.querySelectorAll('.ch-del').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Meydan okuma silinsin mi?')) return;
+    await sb.from('challenges').delete().eq('id', btn.dataset.ch);
+    renderChallenges();
+  }));
+  app.querySelectorAll('.entry-add').forEach(btn => btn.addEventListener('click', async () => {
+    const postId = document.getElementById(`entryPick-${btn.dataset.ch}`)?.value;
+    if (!postId) return;
+    const { error: eErr } = await sb.from('challenge_entries').insert({ challenge_id: btn.dataset.ch, post_id: postId, user_id: currentUser.id });
+    if (eErr) return alert('Gönderilemedi: ' + eErr.message);
+    renderChallenges();
+  }));
+}
+
+async function renderAyinHalkasi(query = '') {
+  const monthParam = new URLSearchParams(query).get('ay');
+  const now = new Date();
+  let year = now.getFullYear(), month = now.getMonth(); // 0-based
+  const m = /^(\d{4})-(\d{2})$/.exec(monthParam || '');
+  if (m) { year = Number(m[1]); month = Number(m[2]) - 1; }
+  const start = new Date(year, month, 1);
+  const end = new Date(year, month + 1, 1);
+  const monthName = start.toLocaleDateString('tr-TR', { month: 'long', year: 'numeric' });
+  const prevKey = `${new Date(year, month - 1, 1).getFullYear()}-${String(new Date(year, month - 1, 1).getMonth() + 1).padStart(2, '0')}`;
+  const nextKey = `${new Date(year, month + 1, 1).getFullYear()}-${String(new Date(year, month + 1, 1).getMonth() + 1).padStart(2, '0')}`;
+  const isCurrent = year === now.getFullYear() && month === now.getMonth();
+
+  app.innerHTML = loadingBlock('Ayın Halka\'sı hazırlanıyor…');
+  const { data: posts, error } = await sb.from('posts').select('id,title,type,kind,author_id,created_at,view_count,description')
+    .gte('created_at', start.toISOString()).lt('created_at', end.toISOString())
+    .order('view_count', { ascending: false }).limit(60);
+  if (error) { app.innerHTML = `<div class="empty">Vitrin yüklenemedi.<br><span class="small">${esc(error.message)}</span></div>`; return; }
+  const list = posts || [];
+  const ids = list.map(p => p.id);
+  const likeCounts = {}, commentCounts = {};
+  if (ids.length) {
+    const [{ data: lk }, { data: cm }] = await Promise.all([
+      sb.from('likes').select('post_id').in('post_id', ids),
+      sb.from('comments').select('post_id').in('post_id', ids)
+    ]);
+    (lk || []).forEach(l => { likeCounts[l.post_id] = (likeCounts[l.post_id] || 0) + 1; });
+    (cm || []).forEach(c => { commentCounts[c.post_id] = (commentCounts[c.post_id] || 0) + 1; });
+  }
+  const authorIds = [...new Set(list.map(p => p.author_id))];
+  const { data: aps } = authorIds.length ? await sb.from('profiles').select('id,username,display_name').in('id', authorIds) : { data: [] };
+  const aMap = Object.fromEntries((aps || []).map(p => [p.id, p]));
+  const ranked = list
+    .map(p => ({ ...p, score: (likeCounts[p.id] || 0) * 3 + (commentCounts[p.id] || 0) * 2 + (p.view_count || 0), likes: likeCounts[p.id] || 0, comments: commentCounts[p.id] || 0 }))
+    .sort((a, b) => b.score - a.score).slice(0, 10);
+  const medals = ['🥇', '🥈', '🥉'];
+
+  app.innerHTML = `
+    <section class="hero">
+      <div class="eyebrow">🏆 Ayın Halka'sı</div>
+      <h1>${esc(monthName)}</h1>
+      <p class="subtitle">${isCurrent ? 'Bu ay en çok parlayan eserler — beğeni ×3, yorum ×2, görüntülenme ×1.' : 'O ayın en çok parlayan eserleri.'}</p>
+      <div style="display:flex;gap:8px;justify-content:center">
+        <a class="btn ghost small" href="#/ayin-halkasi?ay=${prevKey}">‹ Önceki ay</a>
+        ${!isCurrent ? `<a class="btn ghost small" href="#/ayin-halkasi">Bu ay</a>` : ''}
+        ${!isCurrent ? `<a class="btn ghost small" href="#/ayin-halkasi?ay=${nextKey}">Sonraki ay ›</a>` : ''}
+      </div>
+    </section>
+    <section class="card">
+      <div class="post-list">
+        ${ranked.length ? ranked.map((p, i) => `<a class="post-card" href="#/read/${encodeURIComponent(p.id)}">
+          <div class="post-card-body">
+            <div class="post-card-title">${medals[i] || `<span class="small">${i + 1}.</span>`} ${esc(p.title || 'Başlıksız eser')}</div>
+            <div class="small">${esc(quickTypeLabel(p))} · <a href="#/user/${encodeURIComponent(p.author_id)}">${esc(displayName(aMap[p.author_id], 'Halka üyesi'))}</a></div>
+            <div class="small" style="margin-top:4px">❤️ ${p.likes} · 💬 ${p.comments} · 👁 ${p.view_count || 0} · <strong>skor ${p.score}</strong></div>
+          </div>
+        </a>`).join('') : '<div class="empty">Bu ayda vitrine çıkacak eser yok.</div>'}
+      </div>
+    </section>`;
+}
+
 async function renderSharedList(id) {
   app.innerHTML = loadingBlock('Liste açılıyor…');
   const { data: col, error } = await sb.from('collections').select('*').eq('id', id).maybeSingle();
@@ -7193,6 +7423,9 @@ async function route() {
   if (view === 'topluluk') return renderCommunity(safeDecode(arg), query);
   if (view === 'seri') return renderSeries(safeDecode(arg));
   if (view === 'liste') return renderSharedList(safeDecode(arg));
+  if (view === 'ayin-halkasi') return renderAyinHalkasi(query);
+  if (view === 'meydan-okuma') return renderChallenges();
+  if (view === 'kritik') return renderCritique();
   if (view === 'koleksiyonlar') return renderCollections();
   if (view === 'ozet') return renderOzet();
   if (view === 'relay') return arg ? renderRelay(safeDecode(arg)) : renderRelayList();
