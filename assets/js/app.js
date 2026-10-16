@@ -979,9 +979,28 @@ async function renderCollections() {
     if (!itemsByCol.has(i.collection_id)) itemsByCol.set(i.collection_id, []);
     itemsByCol.get(i.collection_id).push(i.posts);
   });
+  // Takip edilen listeler
+  const { data: myFollows } = await sb.from('collection_follows').select('collection_id').eq('user_id', currentUser.id);
+  const followedIds = (myFollows || []).map(f => f.collection_id);
+  let followedCols = [];
+  const followerCounts = {};
+  if (followedIds.length) {
+    const { data: fc } = await sb.from('collections').select('id,name,user_id').in('id', followedIds);
+    followedCols = fc || [];
+  }
+  const allCountIds = [...new Set([...(cols || []).map(c => c.id), ...followedIds])];
+  if (allCountIds.length) {
+    const { data: cnts } = await sb.from('collection_follows').select('collection_id').in('collection_id', allCountIds);
+    (cnts || []).forEach(x => { followerCounts[x.collection_id] = (followerCounts[x.collection_id] || 0) + 1; });
+  }
+  const fcProfiles = {};
+  if (followedCols.length) {
+    const { data: fps } = await sb.from('profiles').select('id,username,display_name').in('id', followedCols.map(c => c.user_id));
+    (fps || []).forEach(p => { fcProfiles[p.id] = p; });
+  }
   const typeIcon = { writing: '✍️', drawing: '🎨', photo: '📷', video: '🎬', music: '🎵' };
   app.innerHTML = `
-    <section class="hero" style="padding-bottom:8px"><div class="eyebrow">HALKA</div><h1>Koleksiyonlarım</h1><p class="subtitle">Kaydettiğin eserleri tematik listelerde topla. Listeler yalnızca sana görünür.</p></section>
+    <section class="hero" style="padding-bottom:8px"><div class="eyebrow">HALKA</div><h1>Koleksiyonlarım</h1><p class="subtitle">Kaydettiğin eserleri tematik listelerde topla. İstersen listeni herkese açıp paylaşabilirsin.</p></section>
     <section class="card">
       <form id="collectionsCreateForm" style="display:flex;gap:8px">
         <input id="collectionsCreateName" maxlength="60" placeholder="Yeni koleksiyon adı (örn. İlham, Okunacaklar)" style="flex:1">
@@ -989,10 +1008,20 @@ async function renderCollections() {
       </form>
       <div id="collectionsMessage" class="message" aria-live="polite"></div>
     </section>
+    ${followedCols.length ? `<section class="card">
+      <div class="section-head"><h2>🔖 Takip ettiğin listeler</h2></div>
+      ${followedCols.map(c => `<div class="collection-item-row">
+        <a href="#/liste/${encodeURIComponent(c.id)}">📖 ${esc(c.name)} <span class="small">· ${esc(displayName(fcProfiles[c.user_id], 'Halka üyesi'))} · ${followerCounts[c.id] || 0} takipçi</span></a>
+      </div>`).join('')}
+    </section>` : ''}
     ${(cols || []).length ? cols.map(c => {
       const colItems = itemsByCol.get(c.id) || [];
       return `<section class="card">
         <div class="section-head"><h2>${esc(c.name)} <span class="small">(${colItems.length})</span></h2><button class="btn ghost small collection-delete" data-col="${esc(c.id)}" type="button">Koleksiyonu sil</button></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn ghost small collection-public" data-col="${esc(c.id)}" type="button">🌐 ${c.is_public ? 'Herkese açık' : 'Özel'}</button>
+          ${c.is_public ? `<a class="btn ghost small" href="#/liste/${encodeURIComponent(c.id)}">Liste sayfası</a><span class="small">${followerCounts[c.id] || 0} takipçi</span>` : ''}
+        </div>
         ${colItems.length ? colItems.map(p => `
           <div class="collection-item-row">
             <a href="#/read/${encodeURIComponent(p.id)}">${typeIcon[p.type || 'writing'] || '✍️'} ${esc(p.title || 'Başlıksız eser')}</a>
@@ -1009,6 +1038,13 @@ async function renderCollections() {
     if (cErr) { setSettingsMessage(document.getElementById('collectionsMessage'), 'Koleksiyon oluşturulamadı: ' + cErr.message, true); return; }
     renderCollections();
   });
+  document.querySelectorAll('.collection-public').forEach(btn => btn.addEventListener('click', async () => {
+    const col = (cols || []).find(c => c.id === btn.dataset.col);
+    if (!col) return;
+    const { error: pErr } = await sb.from('collections').update({ is_public: !col.is_public }).eq('id', col.id).eq('user_id', currentUser.id);
+    if (pErr) { alert('Ayar değiştirilemedi: ' + pErr.message); return; }
+    renderCollections();
+  }));
   document.querySelectorAll('.collection-delete').forEach(btn => btn.addEventListener('click', async () => {
     if (!confirm('Bu koleksiyonu silmek istiyor musun? İçindeki eserler silinmez.')) return;
     const { error: dErr } = await sb.from('collections').delete().eq('id', btn.dataset.col);
@@ -6960,6 +6996,60 @@ async function renderCommunity(id, query = '') {
   }
 }
 
+async function renderSharedList(id) {
+  app.innerHTML = loadingBlock('Liste açılıyor…');
+  const { data: col, error } = await sb.from('collections').select('*').eq('id', id).maybeSingle();
+  if (error || !col || !col.is_public) {
+    app.innerHTML = `<div class="empty">Liste bulunamadı ya da paylaşıma kapalı.${error ? `<br><span class="small">${esc(error.message)}</span>` : ''}</div>`;
+    return;
+  }
+  const { data: items } = await sb.from('collection_items')
+    .select('post_id,added_at,posts:post_id(id,title,type,kind,author_id,description,created_at,view_count)')
+    .eq('collection_id', id).order('added_at', { ascending: false });
+  const { data: owner } = await sb.from('profiles').select('id,username,display_name').eq('id', col.user_id).maybeSingle();
+  const { data: follows } = await sb.from('collection_follows').select('user_id').eq('collection_id', id);
+  const followerCount = (follows || []).length;
+  const isOwner = currentUser?.id === col.user_id;
+  const isFollowing = !!currentUser && (follows || []).some(f => f.user_id === currentUser.id);
+  const typeIcon = { writing: '✍️', drawing: '🎨', photo: '📷', video: '🎬', music: '🎵' };
+  const list = (items || []).filter(i => i.posts);
+
+  app.innerHTML = `
+    <p><a href="#/koleksiyonlar">← Koleksiyonlar</a></p>
+    <section class="hero">
+      <div class="eyebrow">📖 Okuma listesi</div>
+      <h1>${esc(col.name)}</h1>
+      ${col.description ? `<p class="subtitle">${esc(col.description)}</p>` : ''}
+      <p class="meta">Hazırlayan: <a href="#/user/${encodeURIComponent(col.user_id)}">${esc(displayName(owner, 'Halka üyesi'))}</a> · ${list.length} eser · ${followerCount} takipçi</p>
+      ${currentUser && !isOwner ? `<div class="post-actions"><button class="btn ${isFollowing ? 'ghost' : 'primary'} small" id="listFollowBtn" type="button">${isFollowing ? 'Takibi bırak' : '🔖 Listeyi takip et'}</button></div>` : ''}
+      ${!currentUser ? '<p class="small">Listeyi takip etmek için <a href="#/auth">giriş yap</a>.</p>' : ''}
+    </section>
+    <section class="card">
+      <div class="post-list">
+        ${list.length ? list.map(i => {
+          const p = i.posts;
+          return `<a class="post-card" href="#/read/${encodeURIComponent(p.id)}">
+            <div class="post-card-body">
+              <div class="post-card-title">${typeIcon[p.type || 'writing'] || '✍️'} ${esc(p.title || 'Başlıksız eser')}</div>
+              <div class="small">${esc(quickTypeLabel(p))} · ${esc(formatDate(p.created_at))} · ${Number(p.view_count || 0)} görüntülenme</div>
+              ${p.description ? `<div class="small" style="margin-top:4px;opacity:.8">${esc(p.description.slice(0, 120))}${p.description.length > 120 ? '…' : ''}</div>` : ''}
+            </div>
+          </a>`;
+        }).join('') : '<div class="empty">Bu liste henüz boş.</div>'}
+      </div>
+    </section>`;
+
+  document.getElementById('listFollowBtn')?.addEventListener('click', async () => {
+    if (isFollowing) {
+      await sb.from('collection_follows').delete().eq('collection_id', id).eq('user_id', currentUser.id);
+    } else {
+      const { error: fErr } = await sb.from('collection_follows').insert({ collection_id: id, user_id: currentUser.id });
+      if (fErr) return alert('Takip edilemedi: ' + fErr.message);
+    }
+    renderSharedList(id);
+  });
+}
+
 async function renderSeries(id) {
   app.innerHTML = loadingBlock('Seri açılıyor…');
   const { data: series, error } = await sb.from('post_series').select('*').eq('id', id).maybeSingle();
@@ -7102,6 +7192,7 @@ async function route() {
   if (view === 'chat') return renderChat(arg || '', query);
   if (view === 'topluluk') return renderCommunity(safeDecode(arg), query);
   if (view === 'seri') return renderSeries(safeDecode(arg));
+  if (view === 'liste') return renderSharedList(safeDecode(arg));
   if (view === 'koleksiyonlar') return renderCollections();
   if (view === 'ozet') return renderOzet();
   if (view === 'relay') return arg ? renderRelay(safeDecode(arg)) : renderRelayList();
