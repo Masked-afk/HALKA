@@ -5015,6 +5015,13 @@ function openMiniPlayer(src, title, href) {
 }
 function playNextInQueue() {
   const state = miniPlayerState;
+  if (state.jamQueue?.length) {
+    const idx = state.jamQueue.findIndex(t => state.audio?.src && state.audio.src.startsWith(t.src.split('?')[0]));
+    const next = state.jamQueue[idx + 1];
+    if (!next) { state.jamQueue = null; return false; }
+    openMiniPlayer(next.src, next.title, next.href);
+    return true;
+  }
   const els = [...document.querySelectorAll('audio[data-mp-title]')];
   if (!els.length) return false;
   const idx = els.findIndex(el => (el.currentSrc || el.src) === state.audio?.src);
@@ -5027,6 +5034,7 @@ function playNextInQueue() {
 function closeMiniPlayer() {
   const state = miniPlayerState;
   state.audio?.pause();
+  state.jamQueue = null;
   state.bar?.remove();
   miniPlayerState = { audio: null, bar: null, title: '', href: '' };
   document.body.classList.remove('has-mini-player');
@@ -6306,6 +6314,40 @@ async function renderCommunity(id, query = '') {
     collAuthorProfiles = Object.fromEntries((aps || []).map(p => [p.id, p]));
   }
 
+  // Jam odası: topluluk ortak müzik kuyruğu
+  let jamItems = [], jamPostMap = {}, jamAuthors = {}, myMusic = [];
+  const fetchJam = async () => {
+    const { data: jq } = await sb.from('community_jam_queue').select('*').eq('community_id', id).order('position').order('created_at');
+    jamItems = jq || [];
+    const jpIds = [...new Set(jamItems.map(i => i.post_id))];
+    let jamPosts = [];
+    if (jpIds.length) {
+      const { data: ps } = await sb.from('posts').select('id,title,media_url,author_id,allow_download').in('id', jpIds);
+      jamPosts = ps || [];
+      await signPostMedia(jamPosts);
+    }
+    jamPostMap = Object.fromEntries(jamPosts.map(p => [p.id, p]));
+    const aIds = [...new Set(jamItems.map(i => i.added_by))];
+    if (aIds.length) {
+      const { data: aps } = await sb.from('profiles').select('id,username,display_name').in('id', aIds);
+      jamAuthors = Object.fromEntries((aps || []).map(p => [p.id, p]));
+    }
+  };
+  if (me) {
+    await fetchJam();
+    const { data: mm } = await sb.from('posts').select('id,title').eq('author_id', currentUser.id).eq('type', 'music').order('created_at', { ascending: false });
+    myMusic = mm || [];
+  }
+  const jamListHTML = () => jamItems.length ? jamItems.map(it => {
+    const p = jamPostMap[it.post_id];
+    const canDel = it.added_by === currentUser?.id || isAdmin;
+    return `<div class="member-row">
+      ${p ? `<button class="btn ghost small jam-play" data-post="${esc(it.post_id)}" type="button" title="Çal">▶</button>
+      <a class="member-id" href="#/read/${encodeURIComponent(it.post_id)}"><span>♪ ${esc(p.title || 'Parça')}<br><span class="small">ekleyen: ${esc(displayName(jamAuthors[it.added_by], 'Üye'))}</span></span></a>` : `<span class="small">(eser silinmiş)</span>`}
+      ${canDel ? `<button class="btn ghost small jam-remove" data-post="${esc(it.post_id)}" type="button" title="Kuyruktan kaldır">🗑</button>` : ''}
+    </div>`;
+  }).join('') : '<div class="empty small">Kuyruk boş — ilk parçayı sen ekle.</div>';
+
   const POLICY_LABEL = { open: 'Açık topluluk', approval: 'İstek onaylı', invite: 'Sadece davet' };
   let joinArea = '';
   if (!currentUser) joinArea = '<a class="btn primary" href="#/auth?signup">Katılmak için giriş yap</a>';
@@ -6397,6 +6439,19 @@ async function renderCommunity(id, query = '') {
           }).join('')}</div>` : '<div class="empty small">Bu yayında henüz eser yok.</div>'}
         </div>` : ''}
     </section>
+    ${me ? `<section class="card">
+      <div class="section-head"><h2>🎧 Jam odası</h2>${jamItems.length ? '<button class="btn primary small" id="jamPlayAll" type="button">▶ Tümünü çal</button>' : ''}</div>
+      <div id="jamList">${jamListHTML()}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <select id="jamPick" style="flex:1;min-width:180px">${myMusic.filter(p => !jamItems.some(it => it.post_id === p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.title || 'Parça')}</option>`).join('') || '<option value="">Müzik eserin yok</option>'}</select>
+        <button class="btn ghost small" id="jamAddBtn" type="button">+ Ekle</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <input id="jamLink" maxlength="200" placeholder="veya başkasının müzik eseri linki/ID'si" style="flex:1">
+        <button class="btn ghost small" id="jamLinkBtn" type="button">Linkle ekle</button>
+      </div>
+      <div class="small" style="margin-top:6px">Kuyruk tüm üyelere ortaktır — eklenen parçalar herkese anında görünür.</div>
+    </section>` : ''}
     <section class="card">
       <div class="section-head"><h2>Üyeler</h2></div>
       <div class="member-list">${memberRows.map(m => {
@@ -6551,6 +6606,55 @@ async function renderCommunity(id, query = '') {
     location.hash = `#/topluluk/${encodeURIComponent(id)}`;
   });
 
+  // Jam odası
+  const jamAdd = async postId => {
+    if (!postId) return;
+    const { error } = await sb.from('community_jam_queue').insert({
+      community_id: id, post_id: postId, added_by: currentUser.id,
+      position: jamItems.length
+    });
+    if (error) return alert('Kuyruğa eklenemedi: ' + (error.message.includes('duplicate') ? 'Bu parça zaten kuyrukta.' : error.message));
+  };
+  document.getElementById('jamAddBtn')?.addEventListener('click', () => {
+    const postId = document.getElementById('jamPick')?.value;
+    if (!postId) return alert('Listeden müzik eseri seç.');
+    jamAdd(postId);
+  });
+  document.getElementById('jamLinkBtn')?.addEventListener('click', () => {
+    const raw = (document.getElementById('jamLink')?.value || '').trim();
+    const m = raw.match(/read\/([0-9a-f-]{36})/i) || raw.match(/^([0-9a-f-]{36})$/i);
+    if (!m) return alert('Geçerli bir eser linki yapıştır (okuma sayfası linki).');
+    jamAdd(m[1]);
+  });
+  const bindJamList = () => {
+    app.querySelectorAll('.jam-play').forEach(btn => btn.addEventListener('click', () => {
+      const p = jamPostMap[btn.dataset.post];
+      if (p?.media_url) {
+        miniPlayerState.jamQueue = null;
+        openMiniPlayer(p.media_url, p.title || 'Parça', `#/read/${encodeURIComponent(p.id)}`);
+      }
+    }));
+    app.querySelectorAll('.jam-remove').forEach(btn => btn.addEventListener('click', async () => {
+      const { error } = await sb.from('community_jam_queue').delete()
+        .eq('community_id', id).eq('post_id', btn.dataset.post);
+      if (error) alert('Kaldırılamadı: ' + error.message);
+    }));
+  };
+  bindJamList();
+  const reloadJam = async () => {
+    await fetchJam();
+    const list = document.getElementById('jamList');
+    if (!list) return;
+    list.innerHTML = jamListHTML();
+    bindJamList();
+  };
+  document.getElementById('jamPlayAll')?.addEventListener('click', () => {
+    const tracks = jamItems.map(it => jamPostMap[it.post_id]).filter(p => p?.media_url)
+      .map(p => ({ src: p.media_url, title: p.title || 'Parça', href: `#/read/${encodeURIComponent(p.id)}` }));
+    if (!tracks.length) return;
+    miniPlayerState.jamQueue = tracks;
+    openMiniPlayer(tracks[0].src, tracks[0].title, tracks[0].href);
+  });
   document.getElementById('communityEditForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -6651,13 +6755,16 @@ async function renderCommunity(id, query = '') {
       if (delErr) { alert('Kanal silinemedi: ' + delErr.message); return; }
       location.hash = `#/topluluk/${encodeURIComponent(id)}`;
     }));
-    try {
-      communityRealtime = sb.channel(`community-channel-${activeChannel.id}`)
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'community_channel_messages', filter: `channel_id=eq.${activeChannel.id}` }, () => reloadChannel())
-        .subscribe();
-    } catch {}
     communityPollTimer = setInterval(reloadChannel, 30000);
     reloadChannel();
+  }
+  if (me) {
+    try {
+      communityRealtime = sb.channel(`community-${id}`);
+      communityRealtime.on('postgres_changes', { event: '*', schema: 'public', table: 'community_jam_queue', filter: `community_id=eq.${id}` }, () => reloadJam());
+      if (activeChannel) communityRealtime.on('postgres_changes', { event: '*', schema: 'public', table: 'community_channel_messages', filter: `channel_id=eq.${activeChannel.id}` }, () => reloadChannel());
+      communityRealtime.subscribe();
+    } catch {}
   }
 }
 
