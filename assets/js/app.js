@@ -186,6 +186,9 @@ function showMessage(text, error = false) {
   el.textContent = text;
   el.className = error ? 'message error' : 'message';
 }
+function friendlyWriteError(msg) {
+  return /row-level security|42501/i.test(msg || '') ? 'Hesabın bu işlem için kısıtlı görünüyor. Sorun olduğunu düşünüyorsan yönetime bildir.' : msg;
+}
 function displayName(profile, fallback = 'Halka yazarı') {
   return profile?.display_name?.trim() || profile?.username || fallback;
 }
@@ -791,6 +794,12 @@ async function renderSearch(rawQuery) {
         <input type="search" id="searchPageInput" maxlength="80" value="${esc(q)}" placeholder="Kullanıcı, eser, topluluk veya #hashtag ara…" autofocus>
         <button class="btn primary" type="submit">Ara</button>
       </form>
+      <div id="searchFilters" style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:10px">
+        <select id="fType"><option value="">Tüm türler</option><option value="writing">✍️ Yazı</option><option value="drawing">🎨 Çizim</option><option value="photo">📷 Fotoğraf</option><option value="video">🎬 Video</option><option value="music">🎵 Müzik</option></select>
+        <select id="fKind"><option value="">Tüm yazı türleri</option><option value="book">📚 Kitap</option><option value="blog">📝 Blog</option><option value="story">📖 Kısa metin</option><option value="manga">🗯️ Manga</option><option value="lightnovel">📓 Light novel</option></select>
+        <select id="fLength"><option value="">Her uzunluk</option><option value="short">Kısa (&lt;1k kelime)</option><option value="mid">Orta (1–10k)</option><option value="long">Uzun (10k+)</option></select>
+        <select id="fSeries"><option value="">Seri fark etmez</option><option value="in">📚 Seride olan</option><option value="out">Serisiz</option></select>
+      </div>
     </section>
     <div id="searchResults">${q ? loadingBlock('Aranıyor…') : '<div class="empty">Ne aradığını yaz: bir kullanıcı adı, eser başlığı, topluluk veya #hashtag.</div>'}</div>`;
   const searchInput = document.getElementById('searchPageInput');
@@ -822,21 +831,56 @@ async function renderSearch(rawQuery) {
   const authorIds = [...new Set(posts.map(p => p.author_id).filter(Boolean))];
   const { data: authors } = authorIds.length ? await sb.from('profiles').select('id,username,display_name').in('id', authorIds) : { data: [] };
   const authorMap = Object.fromEntries((authors || []).map(a => [a.id, a]));
-  box.innerHTML = `
+
+  // Gelişmiş filtre verileri: uzunluk (kelime) ve seri üyeliği
+  const postIds = posts.map(p => p.id);
+  let wordCounts = {}, seriesSet = new Set();
+  if (postIds.length) {
+    const [{ data: chs }, { data: sItems }] = await Promise.all([
+      sb.from('chapters').select('post_id,body').in('post_id', postIds),
+      sb.from('series_items').select('post_id').in('post_id', postIds)
+    ]);
+    (chs || []).forEach(c => { wordCounts[c.post_id] = (wordCounts[c.post_id] || 0) + (c.body || '').split(/\s+/).filter(Boolean).length; });
+    (sItems || []).forEach(s => seriesSet.add(s.post_id));
+  }
+  const lengthBucket = wc => wc < 1000 ? 'short' : wc <= 10000 ? 'mid' : 'long';
+  const applyFilters = list => list.filter(p => {
+    const ft = document.getElementById('fType')?.value || '';
+    const fk = document.getElementById('fKind')?.value || '';
+    const fl = document.getElementById('fLength')?.value || '';
+    const fs = document.getElementById('fSeries')?.value || '';
+    if (ft && (p.type || 'writing') !== ft) return false;
+    if (fk && p.kind !== fk) return false;
+    if (fl && lengthBucket(wordCounts[p.id] || 0) !== fl) return false;
+    if (fs === 'in' && !seriesSet.has(p.id)) return false;
+    if (fs === 'out' && seriesSet.has(p.id)) return false;
+    return true;
+  });
+
+  const renderPosts = () => {
+    const filtered = applyFilters(posts);
+    return filtered.length ? `<section><div class="section-head"><h2>Eserler (${filtered.length})</h2></div>${filtered.map(p => `
+      <article class="card search-hit"><a class="search-hit-main" href="#/read/${encodeURIComponent(p.id)}">
+        <strong>${esc(p.title || 'Başlıksız eser')}</strong>
+      </a><span class="small">${esc(quickTypeLabel(p))} · ${esc(displayName(authorMap[p.author_id]))} · ${esc(formatDate(p.created_at))}${seriesSet.has(p.id) ? ' · 📚 seri' : ''}${wordCounts[p.id] ? ` · ~${wordCounts[p.id].toLocaleString('tr-TR')} kelime` : ''}</span>
+      ${(p.tags || []).length ? `<div class="post-tags">${p.tags.slice(0, 5).map(t => `<a class="tag" href="#/search?q=${encodeURIComponent('#' + t)}">#${esc(t)}</a>`).join('')}</div>` : ''}</article>`).join('')}</section>` : '';
+  };
+  const renderAll = () => {
+    const postsHTML = renderPosts();
+    box.innerHTML = `
     ${users.length ? `<section><div class="section-head"><h2>Kullanıcılar</h2></div>${users.map(u => `
       <article class="card search-hit"><a class="search-hit-main" href="#/user/${encodeURIComponent(u.id)}">
         <strong>${esc(u.display_name || 'Halka kullanıcısı')}</strong> <span class="small">@${esc(u.username || '')}</span>
       </a><span class="small">${u.last_active_at ? `Son görülme: ${esc(formatDate(u.last_active_at))}` : ''}</span></article>`).join('')}</section>` : ''}
-    ${posts.length ? `<section><div class="section-head"><h2>Eserler</h2></div>${posts.map(p => `
-      <article class="card search-hit"><a class="search-hit-main" href="#/read/${encodeURIComponent(p.id)}">
-        <strong>${esc(p.title || 'Başlıksız eser')}</strong>
-      </a><span class="small">${esc(quickTypeLabel(p))} · ${esc(displayName(authorMap[p.author_id]))} · ${esc(formatDate(p.created_at))}</span>
-      ${(p.tags || []).length ? `<div class="post-tags">${p.tags.slice(0, 5).map(t => `<a class="tag" href="#/search?q=${encodeURIComponent('#' + t)}">#${esc(t)}</a>`).join('')}</div>` : ''}</article>`).join('')}</section>` : ''}
+    ${postsHTML || (posts.length ? '<div class="empty">Filtrelere uyan eser yok — filtreleri gevşetmeyi dene.</div>' : '')}
     ${communities.length ? `<section><div class="section-head"><h2>Topluluklar</h2></div>${communities.map(c => `
       <article class="card search-hit"><a class="search-hit-main" href="#/topluluk/${encodeURIComponent(c.id)}">
         <strong style="color:${esc(c.color || '#D4537E')}">${esc(c.name)}</strong>
-      </a><span class="small">${esc((c.description || '').slice(0, 120))}</span></article>`).join('')}</section>` : ''}
-  `;
+      </a><span class="small">${esc((c.description || '').slice(0, 120))}</span></article>`).join('')}</section>` : ''}`;
+  };
+  renderAll();
+  if (!posts.length) document.getElementById('searchFilters').style.display = 'none';
+  ['fType', 'fKind', 'fLength', 'fSeries'].forEach(fid => document.getElementById(fid)?.addEventListener('change', renderAll));
 }
 
 let topPeriod = 'day';
@@ -1851,7 +1895,7 @@ function renderWrite() {
       const { data: post, error } = await sb.from('posts').insert(postValues).select().single();
       if (error) {
         if (coverPath) await sb.storage.from('profile-images').remove([coverPath]);
-        showMessage('Eser oluşturulamadı: ' + error.message, true); return;
+        showMessage('Eser oluşturulamadı: ' + friendlyWriteError(error.message), true); return;
       }
       // Seri bağlantısı (isteğe bağlı)
       const seriesPickVal = String(form.get('series') || '');
@@ -2552,7 +2596,7 @@ async function renderRead(id, query = '') {
       media_second: pendingTimestamp
     }).select('*').single();
     button.disabled = false;
-    if (cErr) { alert('Yorum eklenemedi: ' + cErr.message); return; }
+    if (cErr) { alert('Yorum eklenemedi: ' + friendlyWriteError(cErr.message)); return; }
     form.reset();
     pendingTimestamp = null;
     const hint = document.getElementById('timestampHint');
@@ -2591,7 +2635,7 @@ async function renderRead(id, query = '') {
         post_id: id, author_id: currentUser.id, chapter_id: form.dataset.chapter, body
       }).select('*').single();
       submitBtn.disabled = false;
-      if (cErr) { alert('Yorum eklenemedi: ' + cErr.message); return; }
+      if (cErr) { alert('Yorum eklenemedi: ' + friendlyWriteError(cErr.message)); return; }
       textarea.value = '';
       comments.push(data);
       const chapterKey = form.dataset.chapter;
@@ -2639,7 +2683,7 @@ async function renderRead(id, query = '') {
           chapter_id: btn.dataset.chapter, paragraph_index: Number(btn.dataset.para), body
         }).select('*').single();
         submitBtn.disabled = false;
-        if (cErr) { alert('Yorum eklenemedi: ' + cErr.message); return; }
+        if (cErr) { alert('Yorum eklenemedi: ' + friendlyWriteError(cErr.message)); return; }
         comments.push(data);
         if (!commentsByParagraph.has(pKey)) commentsByParagraph.set(pKey, []);
         commentsByParagraph.get(pKey).push(data);
@@ -3190,6 +3234,29 @@ async function renderProfile(id) {
     const { data: followRow } = await sb.from('follows').select('follower_id').eq('follower_id', currentUser.id).eq('followed_id', userId).maybeSingle();
     isFollowing = !!followRow;
   }
+
+  // Profil vitrini: öne çıkan eser + sabitlenmiş herkese açık koleksiyon
+  let featuredPost = null, pinnedCollection = null, pinnedCollPosts = [];
+  if (profile.featured_post_id) {
+    const { data: fp } = await sb.from('posts').select('*').eq('id', profile.featured_post_id).maybeSingle();
+    if (fp) {
+      featuredPost = (await attachBookCovers([fp]))[0];
+      await signPostMedia([featuredPost]);
+    }
+  }
+  if (profile.pinned_collection_id) {
+    const { data: pc } = await sb.from('collections').select('id,name,user_id,is_public').eq('id', profile.pinned_collection_id).maybeSingle();
+    if (pc && (pc.is_public || isOwnProfile)) {
+      pinnedCollection = pc;
+      const { data: items } = await sb.from('collection_items').select('post_id').eq('collection_id', pc.id).limit(4);
+      const itemIds = (items || []).map(i => i.post_id);
+      if (itemIds.length) {
+        const { data: ips } = await sb.from('posts').select('*').in('id', itemIds);
+        pinnedCollPosts = await attachBookCovers(ips || []);
+        await signPostMedia(pinnedCollPosts);
+      }
+    }
+  }
   app.innerHTML = `
     <main class="profile-page profile-layout-${['compact', 'showcase'].includes(profile.profile_layout) ? profile.profile_layout : 'standard'}" style="--profile-accent:${profileAccent(profile)}">
     <div class="profile-cover" ${coverUrl ? `style="background-image:url('${esc(coverUrl)}')"` : ''} role="img" aria-label="${esc(name)} kapak görseli"></div>
@@ -3225,6 +3292,25 @@ async function renderProfile(id) {
       `}
     </div>` : ''}
     ${badgeShelfHTML(engagement, specialBadges)}
+    ${featuredPost ? `<section class="card" style="border:1px solid ${profileAccent(profile)}55">
+      <div class="eyebrow">⭐ Vitrin eseri</div>
+      <div style="display:flex;gap:14px;align-items:center;margin-top:8px">
+        ${postCoverHTML(featuredPost)}
+        <div>
+          <h3 style="margin:0 0 4px"><a href="#/read/${encodeURIComponent(featuredPost.id)}">${esc(featuredPost.title || 'Başlıksız eser')}</a></h3>
+          <div class="small">${esc(quickTypeLabel(featuredPost))} · ${esc(formatDate(featuredPost.created_at))}</div>
+          ${featuredPost.description ? `<p class="small" style="margin:6px 0 0">${esc(featuredPost.description.slice(0, 160))}${featuredPost.description.length > 160 ? '…' : ''}</p>` : ''}
+        </div>
+      </div>
+    </section>` : ''}
+    ${pinnedCollection ? `<section class="card">
+      <div class="section-head"><h3 style="margin:0">📌 ${esc(pinnedCollection.name)}</h3><a class="btn ghost small" href="#/liste/${encodeURIComponent(pinnedCollection.id)}">Listeyi aç</a></div>
+      ${pinnedCollPosts.length ? `<div class="saved-grid">${pinnedCollPosts.map(p => `<article class="card saved-card">
+        <div class="meta"><span>${esc(quickTypeLabel(p))}</span></div>
+        ${postCoverHTML(p)}
+        <h4 style="margin:4px 0 0"><a href="#/read/${encodeURIComponent(p.id)}">${esc(p.title || 'Başlıksız')}</a></h4>
+      </article>`).join('')}</div>` : '<div class="empty small">Liste henüz boş.</div>'}
+    </section>` : ''}
     ${isOwnProfile ? `
       <section class="card">
         <h2>Profili düzenle</h2>
@@ -3707,7 +3793,26 @@ async function renderAdmin() {
     ${bugCards ? `<section><h2>Hata bildirimleri</h2>${bugCards}</section>` : ''}
     ${flagCards ? `<section style="margin-top:32px"><h2>Otomatik yakalamalar</h2>${flagCards}</section>` : ''}
     <section${flagCards || bugCards ? ' style="margin-top:32px"' : ''}><h2>İnceleme kuyruğu</h2>${reportCards || '<div class="empty">Açık bildirim yok.</div>'}</section>
+    <section style="margin-top:32px"><h2>Aktif kısıtlar</h2><div id="adminRestrictions"><div class="empty small">Yükleniyor…</div></div></section>
     <section style="margin-top:32px"><h2>Son yönetim işlemleri</h2>${history || '<div class="empty">Henüz işlem kaydı yok.</div>'}</section>`;
+  const loadRestrictions = async () => {
+    const box = document.getElementById('adminRestrictions');
+    const { data: ress } = await sb.from('user_restrictions').select('*').order('created_at', { ascending: false });
+    const active = (ress || []).filter(r => !r.until || +new Date(r.until) > Date.now());
+    if (!active.length) { box.innerHTML = '<div class="empty small">Aktif kısıt yok.</div>'; return; }
+    const { data: rps } = await sb.from('profiles').select('id,username,display_name').in('id', [...new Set(active.map(r => r.user_id))]);
+    const rpMap = Object.fromEntries((rps || []).map(p => [p.id, p]));
+    box.innerHTML = active.map(r => `<div class="member-row">
+      <a class="member-id" href="#/user/${encodeURIComponent(r.user_id)}"><span class="avatar">${initials(displayName(rpMap[r.user_id]))}</span><span>${esc(displayName(rpMap[r.user_id]))}<br><span class="small">${r.kind === 'post' ? '⛔ Yayın yasak' : '💬 Yorum yasak'} · ${r.until ? esc(new Date(r.until).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' })) + "'e kadar" : 'süresiz'}${r.reason ? ' · ' + esc(r.reason) : ''}</span></span></a>
+      <button class="btn ghost small restr-clear" data-user="${esc(r.user_id)}" data-kind="${esc(r.kind)}" type="button">Kaldır</button>
+    </div>`).join('');
+    box.querySelectorAll('.restr-clear').forEach(b => b.addEventListener('click', async () => {
+      const { error: e2 } = await sb.rpc('admin_clear_restriction', { target_user: b.dataset.user, restriction_kind: b.dataset.kind });
+      if (e2) return alert('Kaldırılamadı: ' + e2.message);
+      loadRestrictions();
+    }));
+  };
+  loadRestrictions();
   document.getElementById('adminUserSearchForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const username = document.getElementById('adminUserSearch').value.trim().replace(/^@+/, '').toLowerCase();
@@ -3716,12 +3821,18 @@ async function renderAdmin() {
     if (error) { box.innerHTML = `<div class="message error">${esc(error.message)}</div>`; return; }
     const fieldLabel = { username: 'Kullanıcı adı', display_name: 'Görünen ad' };
     const historyRows = (data.changes || []).map(c => `<div class="small">${esc(fieldLabel[c.field] || c.field)}: ${esc(c.old || '—')} → ${esc(c.new || '—')} · ${esc(formatDate(c.at))}</div>`).join('');
+    const { data: uRes } = await sb.from('user_restrictions').select('*').eq('user_id', data.id);
+    const uActive = (uRes || []).filter(r => !r.until || +new Date(r.until) > Date.now());
+    const hasRes = kind => uActive.some(r => r.kind === kind);
     box.innerHTML = `<div class="card" style="padding:14px">
       <div><strong>${esc(data.display_name || '')}</strong> <span class="small">@${esc(data.username)}${data.is_suspended ? ' · KISITLI' : ''}</span></div>
       <div style="margin-top:8px">${historyRows || '<div class="small">Ad değişikliği kaydı yok.</div>'}</div>
+      ${uActive.length ? `<div class="small" style="margin-top:6px">${uActive.map(r => `${r.kind === 'post' ? '⛔ Yayın' : '💬 Yorum'} yasak${r.until ? ` (${esc(new Date(r.until).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }))})` : ' (süresiz)'}`).join(' · ')}</div>` : ''}
       <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
         <a class="btn ghost small" href="#/user/${encodeURIComponent(data.id)}">Profili aç</a>
         <button class="btn ${data.is_suspended ? 'ghost' : 'danger'} small" id="adminSuspendBtn" type="button">${data.is_suspended ? 'Kısıtlamayı kaldır' : 'Hesabı kısıtla'}</button>
+        <button class="btn ghost small restr-toggle" data-kind="comment" type="button">${hasRes('comment') ? '💬 Yorum yasağını kaldır' : '💬 Yorum yasakla'}</button>
+        <button class="btn ghost small restr-toggle" data-kind="post" type="button">${hasRes('post') ? '⛔ Yayın yasağını kaldır' : '⛔ Yayın yasakla'}</button>
       </div><div class="message small" aria-live="polite"></div></div>`;
     document.getElementById('adminSuspendBtn')?.addEventListener('click', async () => {
       const action = data.is_suspended ? 'kısıtlamayı kaldırmak' : 'hesabı kısıtlamak';
@@ -3734,6 +3845,25 @@ async function renderAdmin() {
       status.textContent = 'İşlem uygulandı.';
       document.getElementById('adminUserSearchForm').requestSubmit();
     });
+    box.querySelectorAll('.restr-toggle').forEach(b => b.addEventListener('click', async () => {
+      const kind = b.dataset.kind;
+      const status = box.querySelector('.message');
+      if (hasRes(kind)) {
+        const { error: e2 } = await sb.rpc('admin_clear_restriction', { target_user: data.id, restriction_kind: kind });
+        if (e2) { status.textContent = 'Kaldırılamadı: ' + e2.message; status.classList.add('error'); return; }
+      } else {
+        const hoursRaw = prompt(`${kind === 'post' ? 'Yayın' : 'Yorum'} yasağı süresi — saat olarak gir (boş = süresiz):`, '24');
+        if (hoursRaw === null) return;
+        const hours = hoursRaw.trim() ? Math.max(1, parseInt(hoursRaw, 10) || 0) : null;
+        const reason = prompt('Gerekçe (isteğe bağlı):', '') ?? '';
+        const { error: e2 } = await sb.rpc('admin_set_restriction', { target_user: data.id, restriction_kind: kind, duration_hours: hours, reason_text: reason || null });
+        if (e2) { status.textContent = 'Uygulanamadı: ' + e2.message; status.classList.add('error'); return; }
+      }
+      status.textContent = 'İşlem uygulandı.';
+      status.classList.remove('error');
+      loadRestrictions();
+      document.getElementById('adminUserSearchForm').requestSubmit();
+    }));
   });
   document.getElementById('grantBadgeForm')?.addEventListener('submit', async e => {
     e.preventDefault();
@@ -3959,6 +4089,10 @@ async function renderSettings() {
   if (!currentUser) { location.hash = '#/auth'; return; }
   await loadProfile();
   const profile = currentProfile || {};
+  const [{ data: myPostsForShowcase }, { data: myPublicCollections }] = await Promise.all([
+    sb.from('posts').select('id,title,type,kind').eq('author_id', currentUser.id).eq('is_draft', false).order('created_at', { ascending: false }).limit(60),
+    sb.from('collections').select('id,name').eq('user_id', currentUser.id).eq('is_public', true).order('name')
+  ]);
   const createdAt = currentUser.created_at ? formatDate(currentUser.created_at) : '—';
   app.innerHTML = `
     <section class="hero">
@@ -3999,6 +4133,20 @@ async function renderSettings() {
               <option value="compact" ${profile.profile_layout === 'compact' ? 'selected' : ''}>Sade ve kompakt</option>
               <option value="showcase" ${profile.profile_layout === 'showcase' ? 'selected' : ''}>Görsel odaklı</option>
             </select>
+          </div>
+          <div class="field"><label for="settingsFeatured">Vitrin eseri</label>
+            <select id="settingsFeatured" name="featured_post_id">
+              <option value="">— Yok —</option>
+              ${(myPostsForShowcase || []).map(p => `<option value="${esc(p.id)}" ${profile.featured_post_id === p.id ? 'selected' : ''}>${esc(quickTypeLabel(p))} — ${esc(p.title || 'Başlıksız')}</option>`).join('')}
+            </select>
+            <div class="small">Profilinin en üstünde öne çıkan eserin görünür.</div>
+          </div>
+          <div class="field"><label for="settingsPinnedColl">Sabitlenen koleksiyon</label>
+            <select id="settingsPinnedColl" name="pinned_collection_id">
+              <option value="">— Yok —</option>
+              ${(myPublicCollections || []).map(c => `<option value="${esc(c.id)}" ${profile.pinned_collection_id === c.id ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+            </select>
+            <div class="small">Yalnızca herkese açık listeler sabitlenebilir — Koleksiyonlarım sayfasından 🌐 ile açabilirsin.</div>
           </div>
           <button class="btn primary" type="submit">Profil bilgilerini kaydet</button>
           <div id="settingsProfileMessage" class="message" aria-live="polite"></div>
@@ -4096,10 +4244,12 @@ async function renderSettings() {
     if (!/^[a-z0-9_]{3,20}$/.test(username)) return setSettingsMessage(message, 'Kullanıcı adı 3–20 karakter olmalı; küçük harf, rakam ve alt çizgi kullan.', true);
     if (!/^#[0-9a-f]{6}$/i.test(profile_accent)) return setSettingsMessage(message, 'Profil rengi geçerli değil.', true);
     if (!['standard', 'compact', 'showcase'].includes(profile_layout)) return setSettingsMessage(message, 'Profil düzeni geçerli değil.', true);
+    const featured_post_id = String(form.get('featured_post_id') || '') || null;
+    const pinned_collection_id = String(form.get('pinned_collection_id') || '') || null;
     button.disabled = true;
-    let { error } = await sb.from('profiles').update({ username, display_name, bio, profile_visibility, stats_visibility, profile_accent, profile_layout }).eq('id', currentUser.id);
+    let { error } = await sb.from('profiles').update({ username, display_name, bio, profile_visibility, stats_visibility, profile_accent, profile_layout, featured_post_id, pinned_collection_id }).eq('id', currentUser.id);
     let migrationPending = false;
-    if (error && /profile_accent|profile_layout|profile_visibility|stats_visibility|schema cache/i.test(error.message || '')) {
+    if (error && /featured_post_id|pinned_collection_id|profile_accent|profile_layout|profile_visibility|stats_visibility|schema cache/i.test(error.message || '')) {
       const fallback = await sb.from('profiles').update({ username, display_name, bio }).eq('id', currentUser.id);
       error = fallback.error;
       migrationPending = !error;
