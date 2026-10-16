@@ -6274,6 +6274,38 @@ async function renderCommunity(id, query = '') {
   const pinnedMessages = channelMessages.filter(m => m.pinned_by);
   const channelQuery = chId => `kanal=${encodeURIComponent(chId)}`;
 
+  // Kolektif yayınlar (dergi/albüm)
+  const wantCollection = new URLSearchParams(query).get('yayin');
+  let collections = [], activeCollection = null, collItems = [], collPosts = [], myPosts = [];
+  {
+    const { data: colls } = await sb.from('community_collections').select('*').eq('community_id', id).order('created_at', { ascending: false });
+    collections = colls || [];
+    activeCollection = collections.find(c => c.id === wantCollection) || null;
+    if (activeCollection) {
+      const { data: items } = await sb.from('community_collection_items').select('*')
+        .eq('collection_id', activeCollection.id).order('position').order('created_at');
+      collItems = (items || []).filter(it => it.status === 'approved' || isAdmin || it.added_by === currentUser?.id);
+      const postIds = [...new Set(collItems.map(i => i.post_id))];
+      if (postIds.length) {
+        const { data: ps } = await sb.from('posts').select('*').in('id', postIds);
+        collPosts = ps || [];
+        await signPostMedia(collPosts);
+        collPosts = await attachBookCovers(collPosts);
+      }
+      if (me) {
+        const { data: mp } = await sb.from('posts').select('id,title,kind,type').eq('author_id', currentUser.id).order('created_at', { ascending: false });
+        myPosts = mp || [];
+      }
+    }
+  }
+  const collPostMap = Object.fromEntries(collPosts.map(p => [p.id, p]));
+  const collAuthors = [...new Set(collPosts.map(p => p.author_id))];
+  let collAuthorProfiles = {};
+  if (collAuthors.length) {
+    const { data: aps } = await sb.from('profiles').select('id,username,display_name').in('id', collAuthors);
+    collAuthorProfiles = Object.fromEntries((aps || []).map(p => [p.id, p]));
+  }
+
   const POLICY_LABEL = { open: 'Açık topluluk', approval: 'İstek onaylı', invite: 'Sadece davet' };
   let joinArea = '';
   if (!currentUser) joinArea = '<a class="btn primary" href="#/auth?signup">Katılmak için giriş yap</a>';
@@ -6331,6 +6363,40 @@ async function renderCommunity(id, query = '') {
       </form>
       <div id="channelSendMessage" class="message" aria-live="polite"></div>
     </section>` : ''}
+    <section class="card">
+      <div class="section-head"><h2>📓 Kolektif yayınlar</h2>${isAdmin ? '<button class="btn ghost small" id="collAddBtn" type="button">+ Yayın oluştur</button>' : ''}</div>
+      ${collections.length ? `<div class="channel-tabs" style="margin-bottom:10px">${collections.map(c => `
+        <a class="channel-tab ${c.id === activeCollection?.id ? 'on' : ''}" href="#/topluluk/${encodeURIComponent(id)}?yayin=${encodeURIComponent(c.id)}">
+          ${esc(c.title)}${c.issue_no ? ` #${c.issue_no}` : ''}${c.status === 'draft' ? ' <span class="small">(taslak)</span>' : ''}
+        </a>`).join('')}</div>` : '<div class="empty small" style="margin-bottom:10px">Henüz kolektif yayın yok. Üyeler eserlerini gönderir, yöneticiler derler.</div>'}
+      ${activeCollection ? `
+        <div class="coll-detail">
+          <div class="section-head">
+            <h3>${esc(activeCollection.title)}${activeCollection.issue_no ? ` · Sayı ${activeCollection.issue_no}` : ''}</h3>
+            ${isAdmin ? `<span class="member-role">${activeCollection.status === 'published' ? 'Yayında' : 'Taslak'}</span>` : ''}
+          </div>
+          ${activeCollection.description ? `<p class="small" style="margin-bottom:10px">${esc(activeCollection.description)}</p>` : ''}
+          ${me ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+            <select id="collPostPick" style="flex:1;min-width:200px">${myPosts.filter(p => !collItems.some(it => it.post_id === p.id)).map(p => `<option value="${esc(p.id)}">${esc(p.title || 'Başlıksız')} (${esc(quickTypeLabel(p))})</option>`).join('') || '<option value="">Gönderilebilecek eserin yok</option>'}</select>
+            <button class="btn ghost small" id="collSubmitBtn" type="button">📮 Eser gönder</button>
+            ${isAdmin ? `<button class="btn ghost small" id="collPublishBtn" type="button">${activeCollection.status === 'published' ? '📥 Taslağa al' : '📣 Yayınla'}</button>
+            <button class="btn ghost small" id="collDeleteBtn" type="button">🗑 Yayını sil</button>` : ''}
+          </div>` : ''}
+          ${collItems.length ? `<div class="post-list">${collItems.map(it => {
+            const p = collPostMap[it.post_id];
+            if (!p) return '';
+            const pending = it.status === 'pending';
+            const canModerate = isAdmin || it.added_by === currentUser?.id;
+            return `<div class="member-row" ${pending ? 'style="opacity:.75"' : ''}>
+              <a class="member-id" href="#/read/${encodeURIComponent(p.id)}">${postCoverHTML(p)}<span>${esc(p.title || 'Başlıksız eser')}<br><span class="small">${esc(quickTypeLabel(p))} · ${esc(displayName(collAuthorProfiles[p.author_id]))}</span></span></a>
+              ${pending ? '<span class="member-role">Onay bekliyor</span>' : ''}
+              ${isAdmin && pending ? `<button class="btn primary small coll-approve" data-item="${esc(it.post_id)}" type="button">Onayla</button>` : ''}
+              ${isAdmin ? `<span style="display:flex;gap:4px"><button class="btn ghost small coll-move" data-item="${esc(it.post_id)}" data-dir="-1" type="button">↑</button><button class="btn ghost small coll-move" data-item="${esc(it.post_id)}" data-dir="1" type="button">↓</button></span>` : ''}
+              ${canModerate ? `<button class="btn ghost small coll-remove" data-item="${esc(it.post_id)}" type="button" title="Kaldır">🗑</button>` : ''}
+            </div>`;
+          }).join('')}</div>` : '<div class="empty small">Bu yayında henüz eser yok.</div>'}
+        </div>` : ''}
+    </section>
     <section class="card">
       <div class="section-head"><h2>Üyeler</h2></div>
       <div class="member-list">${memberRows.map(m => {
@@ -6421,6 +6487,70 @@ async function renderCommunity(id, query = '') {
     if (rpcError) { btn.disabled = false; alert(rpcError.message); return; }
     renderCommunity(id, query);
   }));
+  // Kolektif yayınlar
+  const goColl = cid => { location.hash = `#/topluluk/${encodeURIComponent(id)}?yayin=${encodeURIComponent(cid)}`; };
+  document.getElementById('collAddBtn')?.addEventListener('click', async () => {
+    const title = prompt('Yayın adı (örn. Halka Dergi):');
+    if (!title?.trim()) return;
+    const no = prompt('Sayı numarası (isteğe bağlı, örn. 3):');
+    const { data, error } = await sb.from('community_collections').insert({
+      community_id: id, title: title.trim().slice(0, 120),
+      issue_no: no && /^\d+$/.test(no.trim()) ? Number(no.trim()) : null,
+      created_by: currentUser.id
+    }).select('id').single();
+    if (error) return alert('Yayın oluşturulamadı: ' + error.message);
+    goColl(data.id);
+  });
+  document.getElementById('collSubmitBtn')?.addEventListener('click', async () => {
+    const postId = document.getElementById('collPostPick')?.value;
+    if (!postId) return alert('Gönderilecek eser seç.');
+    const { error } = await sb.from('community_collection_items').insert({
+      collection_id: activeCollection.id, post_id: postId, added_by: currentUser.id,
+      position: collItems.length
+    });
+    if (error) return alert('Eser gönderilemedi: ' + error.message);
+    renderCommunity(id, query);
+  });
+  document.querySelectorAll('.coll-approve').forEach(btn => btn.addEventListener('click', async () => {
+    const { error } = await sb.from('community_collection_items').update({ status: 'approved' })
+      .eq('collection_id', activeCollection.id).eq('post_id', btn.dataset.item);
+    if (error) return alert('Onaylanamadı: ' + error.message);
+    renderCommunity(id, query);
+  }));
+  document.querySelectorAll('.coll-remove').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Eser yayından kaldırılsın mı?')) return;
+    const { error } = await sb.from('community_collection_items').delete()
+      .eq('collection_id', activeCollection.id).eq('post_id', btn.dataset.item);
+    if (error) return alert('Kaldırılamadı: ' + error.message);
+    renderCommunity(id, query);
+  }));
+  document.querySelectorAll('.coll-move').forEach(btn => btn.addEventListener('click', async () => {
+    const it = collItems.find(x => x.post_id === btn.dataset.item);
+    if (!it) return;
+    const idx = collItems.indexOf(it);
+    const swap = collItems[idx + Number(btn.dataset.dir)];
+    if (!swap) return;
+    await Promise.all([
+      sb.from('community_collection_items').update({ position: swap.position }).eq('collection_id', activeCollection.id).eq('post_id', it.post_id),
+      sb.from('community_collection_items').update({ position: it.position }).eq('collection_id', activeCollection.id).eq('post_id', swap.post_id)
+    ]);
+    renderCommunity(id, query);
+  }));
+  document.getElementById('collPublishBtn')?.addEventListener('click', async () => {
+    const next = activeCollection.status === 'published' ? 'draft' : 'published';
+    const { error } = await sb.from('community_collections').update(
+      next === 'published' ? { status: 'published', published_at: new Date().toISOString() } : { status: 'draft' }
+    ).eq('id', activeCollection.id);
+    if (error) return alert('Güncellenemedi: ' + error.message);
+    renderCommunity(id, query);
+  });
+  document.getElementById('collDeleteBtn')?.addEventListener('click', async () => {
+    if (!confirm('Bu kolektif yayın ve içindeki liste silinsin mi? (Eserler silinmez)')) return;
+    const { error } = await sb.from('community_collections').delete().eq('id', activeCollection.id);
+    if (error) return alert('Silinemedi: ' + error.message);
+    location.hash = `#/topluluk/${encodeURIComponent(id)}`;
+  });
+
   document.getElementById('communityEditForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
