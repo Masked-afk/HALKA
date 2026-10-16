@@ -6,3 +6,5 @@ ui-debug.log
 *.log
 .env
 .env.*
+.db-password
+.supabase-token
