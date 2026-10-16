@@ -178,6 +178,19 @@ const BADGE_DEFS = [
   { key: 'safak', name: 'Şafak', desc: 'Şafak vaktinde (05.00–07.00) eser paylaştın', icon: '🌅', secret: true },
   { key: 'gece_yazari', name: 'Gece Yazarı', desc: 'Gece saatlerinde 10 eser paylaştın', icon: '🌙', secret: true },
   { key: 'sansli_gun', name: 'Şanslı Gün', desc: 'Ayın 13’ünde saat 13’te paylaştın', icon: '🍀', secret: true },
+  { key: 'seri_kurdu', name: 'Seri Kurdu', desc: 'En az 2 eserli bir seri oluşturdun', icon: '📚' },
+  { key: 'devam_kahramani', name: 'Devam Kahramanı', desc: 'Devam önerin bölüm olarak yayınlandı', icon: '🧩' },
+  { key: 'kapi_aralayan', name: 'Kapı Aralayan', desc: 'Bir okurun devamını eserine kattın', icon: '🚪' },
+  { key: 'liste_kurucusu', name: 'Liste Kurucusu', desc: 'Herkese açık bir okuma listen var', icon: '📖' },
+  { key: 'liste_sevdalisi', name: 'Liste Sevdalısı', desc: '3+ okuma listesi takip ediyorsun', icon: '🔖' },
+  { key: 'kritik_ustasi', name: 'Kritik Ustası', desc: '5 kritik görevini tamamladın', icon: '🎯' },
+  { key: 'meydan_efendisi', name: 'Meydan Efendisi', desc: '3 farklı meydan okumaya katıldın', icon: '⚡' },
+  { key: 'mangaka', name: 'Mangaka', desc: 'Bir manga eseri yayınladın', icon: '⛩️' },
+  { key: 'hafif_romanci', name: 'Hafif Romancı', desc: 'Bir light novel yayınladın', icon: '📓' },
+  { key: 'nobetci', name: 'Nöbetçi', desc: 'Nöbetleşe hikâyeye katıldın', icon: '🔁' },
+  { key: 'kolektifci', name: 'Kolektifçi', desc: 'Eserin bir topluluk koleksiyonuna kabul edildi', icon: '🤲' },
+  { key: 'jamci', name: 'Jamci', desc: 'Topluluk müzik kuyruğuna parça ekledin', icon: '🎧' },
+  { key: 'asik_okur', name: 'Aşık Okur', desc: '100+ farklı eseri okudun/gezdin', icon: '💛' },
   { key: 'erken_kus', name: 'Halkanın İlk Zincirlerinden', desc: 'İlk 100 üyeden birisin', icon: '🐣', secret: true },
   { key: 'sessiz_dev', name: 'Sessiz Dev', desc: 'Hiç yorum yapmadan 20 eser paylaştın', icon: '🗿', secret: true },
   { key: 'ilk_yorumcu', name: 'İlk Yorumcu', desc: '10 esere ilk yorumu sen yazdın', icon: '⚡', secret: true },
@@ -2932,6 +2945,7 @@ async function renderProfile(id) {
     }
   }
   const [avatarUrl, coverUrl] = await Promise.all([signedProfileImage(profile.avatar_path), signedProfileImage(profile.cover_path)]);
+  await sb.rpc('award_feature_badges', { target_user: userId }).catch(() => {});
   const badgeStatsPromise = badgeStatsCache ? Promise.resolve({ data: badgeStatsCache }) : sb.rpc('badge_stats');
   const [statsResult, engagementResult, specialBadgesResult, badgeRowsResult, badgeStatsResult] = await Promise.all([
     sb.rpc('get_profile_stats', { target_profile_id: userId }),
