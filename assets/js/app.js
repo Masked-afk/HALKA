@@ -1486,6 +1486,10 @@ function renderWrite() {
           <input id="critiqueWanted" name="critique_wanted" type="checkbox" style="width:auto">
           <label for="critiqueWanted" style="margin:0">🎯 Bu esere eleştiri istiyorum — "Eleştiri bekliyor" rozetiyle yayınla</label>
         </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input id="allowDownload" name="allow_download" type="checkbox" style="width:auto">
+          <label for="allowDownload" style="margin:0">⬇️ Bu eserin indirilmesine izin ver</label>
+        </div>
         <div class="field">
           <label for="tags">Hashtag’ler</label>
           <input id="tags" name="tags" maxlength="160" list="hashtagSuggestions" placeholder="fantastik, günlük, kitap">
@@ -1687,6 +1691,7 @@ function renderWrite() {
         description,
         pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
         critique_wanted: form.get('critique_wanted') === 'on',
+        allow_download: form.get('allow_download') === 'on',
         theme_id: new URLSearchParams(location.hash.split('?')[1] || '').get('theme') || null
       };
       if (coverPath) postValues.cover_path = coverPath;
@@ -2102,6 +2107,7 @@ async function renderRead(id, query = '') {
         ${currentUser ? `<a class="btn ghost small" href="#/chat?share=${encodeURIComponent(post.id)}">Sohbette paylaş</a>` : ''}
         ${currentUser ? '<button class="btn ghost small" id="collectionBtn" type="button">📚 Koleksiyona ekle</button>' : ''}
         ${isOwner ? '<button class="btn ghost small" id="newVersionBtn" type="button">📜 Yeni versiyon</button>' : ''}
+        ${isOwner && (post.media_url || post.kind === 'manga') ? `<button class="btn ghost small" id="downloadToggleBtn" type="button" title="Eserin indirilip indirilemeyeceğini seç">⬇️ İndirme: ${post.allow_download ? 'açık' : 'kapalı'}</button>` : ''}
         ${canReportPost ? '<button class="btn ghost small" id="reportPostToggle" type="button">Eseri bildir</button>' : ''}
         ${isCurrentUserAdmin ? '<button class="btn ghost small" id="adminFlagPost" type="button">⚑ İncelemeye al</button>' : ''}
     </div>
@@ -2112,7 +2118,7 @@ async function renderRead(id, query = '') {
       return `
       <section class="chapter" id="chapter-${i}" data-chapter-index="${i}">
         <h3>${esc(ch.title || 'Bölüm')}</h3>
-        ${ch.media_url ? `<img class="manga-page-img" src="${esc(ch.media_url)}" alt="${esc(ch.title || 'Manga sayfası')}" loading="lazy">` : ''}
+        ${ch.media_url ? `<img class="manga-page-img" src="${esc(ch.media_url)}" alt="${esc(ch.title || 'Manga sayfası')}" loading="lazy"${post.allow_download ? '' : ' oncontextmenu="return false" draggable="false"'}>` : ''}
         ${ch.body ? `<div class="chapter-body">${renderParagraphs(ch.body, ch.id, paragraphCounts[ch.id] || {}, post.kind)}</div>` : ''}
         <div class="chapter-comments">
           <button class="chapter-comments-toggle" data-chapter="${esc(ch.id)}" type="button">💬 Bölüm yorumları (<span>${chComments.length}</span>)</button>
@@ -2328,6 +2334,13 @@ async function renderRead(id, query = '') {
   document.getElementById('newVersionBtn')?.addEventListener('click', () => {
     const wrap = document.getElementById('versionFormWrap');
     if (wrap) { wrap.hidden = !wrap.hidden; if (!wrap.hidden) wrap.querySelector('input')?.focus(); }
+  });
+  document.getElementById('downloadToggleBtn')?.addEventListener('click', async () => {
+    const next = !post.allow_download;
+    const { error } = await sb.from('posts').update({ allow_download: next }).eq('id', post.id).eq('author_id', currentUser.id);
+    if (error) return showMessage('Ayar güncellenemedi: ' + error.message, true);
+    showMessage(next ? 'İndirme açıldı — imzalı link üzerinden indirilebilir.' : 'İndirme kapatıldı.');
+    renderRead(post.id);
   });
   document.querySelectorAll('.version-chip').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -4584,13 +4597,14 @@ async function signPostMedia(items, fields = ['media_url']) {
 function mediaHTML(post) {
   if (!post.media_url || !/^https?:\/\//.test(post.media_url)) return '';
   const url = esc(post.media_url);
-  if (post.type === 'video') return `<video class="media" src="${url}" controls controlsList="nodownload" preload="metadata" oncontextmenu="return false"></video>`;
-  if (post.type === 'music') return musicEmbedHTML(post.media_url)
-    .replace('<audio ', `<audio data-mp-title="${esc(post.title || 'Parça')}" data-mp-href="#/read/${encodeURIComponent(post.id)}" controlsList="nodownload" oncontextmenu="return false" `);
-  return `<img class="media" src="${url}" alt="${esc(post.title || '')}" loading="lazy" oncontextmenu="return false" draggable="false">`;
+  const guard = post.allow_download ? '' : ' controlsList="nodownload" oncontextmenu="return false"';
+  if (post.type === 'video') return `<video class="media" src="${url}" controls${guard} preload="metadata"></video>`;
+  if (post.type === 'music') return musicEmbedHTML(post.media_url, post.allow_download)
+    .replace('<audio ', `<audio data-mp-title="${esc(post.title || 'Parça')}" data-mp-href="#/read/${encodeURIComponent(post.id)}"${guard} `);
+  return `<img class="media" src="${url}" alt="${esc(post.title || '')}" loading="lazy"${post.allow_download ? '' : ' oncontextmenu="return false" draggable="false"'}>`;
 }
 
-function musicEmbedHTML(rawUrl) {
+function musicEmbedHTML(rawUrl, allowDownload) {
   try {
     const u = new URL(rawUrl);
     const host = u.hostname.replace(/^www\.|^m\./, '');
@@ -4606,7 +4620,7 @@ function musicEmbedHTML(rawUrl) {
       return `<iframe class="music-embed" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(rawUrl)}&visual=false" scrolling="no" loading="lazy"></iframe>`;
     }
   } catch {}
-  return `<audio class="media" src="${esc(rawUrl)}" controls controlsList="nodownload" preload="metadata" oncontextmenu="return false"></audio>`;
+  return `<audio class="media" src="${esc(rawUrl)}" controls${allowDownload ? '' : ' controlsList="nodownload" oncontextmenu="return false"'} preload="metadata"></audio>`;
 }
 
 async function attachBookCovers(posts) {
@@ -4820,13 +4834,13 @@ function quickTypeLabel(post) {
 
 function quickVisualHTML(post) {
   if (post.type === 'video' && /^https?:\/\//.test(post.media_url || '')) {
-    return `<video class="quick-media" src="${esc(post.media_url)}" muted loop playsinline preload="metadata" title="Sesi açmak veya kapatmak için dokun"></video>`;
+    return `<video class="quick-media" src="${esc(post.media_url)}" muted loop playsinline preload="metadata" title="Sesi açmak veya kapatmak için dokun"${post.allow_download ? '' : ' controlsList="nodownload" oncontextmenu="return false"'}></video>`;
   }
   if ((post.type === 'photo' || post.type === 'drawing') && /^https?:\/\//.test(post.media_url || '')) {
-    return `<img class="quick-media" src="${esc(post.media_url)}" alt="${esc(post.title || '')}" loading="lazy">`;
+    return `<img class="quick-media" src="${esc(post.media_url)}" alt="${esc(post.title || '')}" loading="lazy"${post.allow_download ? '' : ' oncontextmenu="return false" draggable="false"'}>`;
   }
   if (post.type === 'music' && /^https?:\/\//.test(post.media_url || '')) {
-    return `<div class="quick-music"><div class="quick-music-note">♪</div>${musicEmbedHTML(post.media_url)}</div>`;
+    return `<div class="quick-music"><div class="quick-music-note">♪</div>${musicEmbedHTML(post.media_url, post.allow_download)}</div>`;
   }
   if (isChapteredKind(post.kind) || post.cover_signed_url) {
     return `<div class="quick-book">${post.cover_signed_url ? `<img src="${esc(post.cover_signed_url)}" alt="${esc(post.title || 'Kitap')} kapağı">` : '<div class="quick-book-placeholder">Kitap</div>'}<div><span class="eyebrow">Yazarın özeti</span><p>${esc(post.description || 'Yazar bu kitap için henüz bir özet eklememiş.')}</p></div></div>`;
@@ -5076,7 +5090,7 @@ const MEDIA_CREATE = {
 const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 const VIDEO_EXT = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 
-async function publishMediaPost({ type, file, mime, title, tags, description, pen_name, critique_wanted }) {
+async function publishMediaPost({ type, file, mime, title, tags, description, pen_name, critique_wanted, allow_download }) {
   const cfg = MEDIA_CREATE[type];
   mime = String(mime || '').split(';')[0].trim();
   if (/^image\//.test(mime)) {
@@ -5091,7 +5105,7 @@ async function publishMediaPost({ type, file, mime, title, tags, description, pe
   const { data: post, error } = await sb.from('posts').insert({
     author_id: currentUser.id, title, description, tags,
     category: tags[0] || 'Diğer', type, kind: type, media_url: mediaUrl,
-    pen_name: pen_name || null, critique_wanted: !!critique_wanted
+    pen_name: pen_name || null, critique_wanted: !!critique_wanted, allow_download: !!allow_download
   }).select().single();
   if (error) { await sb.storage.from('post-media').remove([path]); throw new Error('Eser oluşturulamadı: ' + error.message); }
   return post;
@@ -5102,6 +5116,7 @@ function mediaPostFormHTML(idPrefix) {
     <div class="field"><label for="${idPrefix}Title">Eserin adı</label><input id="${idPrefix}Title" name="title" required maxlength="120" placeholder="Eserinin adı"></div>
     <div class="field"><label for="${idPrefix}PenName">Kalem adı <span class="small">(isteğe bağlı)</span></label><input id="${idPrefix}PenName" name="pen_name" maxlength="60" placeholder="Boş bırakırsan profil adın görünür"><div class="small">Bu eserde profil adın yerine bu isim gösterilir.</div></div>
     <div class="field" style="display:flex;align-items:center;gap:8px"><input id="${idPrefix}Critique" name="critique_wanted" type="checkbox" style="width:auto"><label for="${idPrefix}Critique" style="margin:0">🎯 Bu esere eleştiri istiyorum</label></div>
+    <div class="field" style="display:flex;align-items:center;gap:8px"><input id="${idPrefix}Download" name="allow_download" type="checkbox" style="width:auto"><label for="${idPrefix}Download" style="margin:0">⬇️ Bu eserin indirilmesine izin ver</label></div>
     <div class="field"><label for="${idPrefix}Tags">Hashtag'ler</label><input id="${idPrefix}Tags" name="tags" maxlength="160" placeholder="çizim, portre"><div class="small">Virgül veya boşlukla ayır; en fazla 5 hashtag.</div><div id="${idPrefix}TagPreview" class="post-tags" aria-live="polite"></div></div>
     <div class="field"><label for="${idPrefix}Desc">Kısa tanıtım</label><textarea id="${idPrefix}Desc" name="description" maxlength="1200" placeholder="Eserin hakkında birkaç cümle…"></textarea></div>`;
 }
@@ -5482,7 +5497,8 @@ function renderCreateMedia(type, mode) {
       if (file.size > cfg.maxMB * 1024 * 1024) { showMessage(`Dosya ${cfg.maxMB} MB sınırını aşmamalı.`, true); return; }
       const post = await publishMediaPost({ type, file, mime, title, tags, description,
         pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
-        critique_wanted: form.get('critique_wanted') === 'on' });
+        critique_wanted: form.get('critique_wanted') === 'on',
+        allow_download: form.get('allow_download') === 'on' });
       stopCameraStream();
       clearDraft();
       location.hash = '#/read/' + encodeURIComponent(post.id);
@@ -5524,6 +5540,10 @@ function renderCreateMusic(mode) {
         <div class="field" style="display:flex;align-items:center;gap:8px">
           <input id="musicCritique" name="critique_wanted" type="checkbox" style="width:auto">
           <label for="musicCritique" style="margin:0">🎯 Bu esere eleştiri istiyorum</label>
+        </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input id="musicDownload" name="allow_download" type="checkbox" style="width:auto">
+          <label for="musicDownload" style="margin:0">⬇️ Bu eserin indirilmesine izin ver</label>
         </div>
         <div class="field">
           <label for="musicTags">Hashtag'ler</label>
@@ -5687,6 +5707,7 @@ function renderCreateMusic(mode) {
         media_url: mediaUrl,
         pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
         critique_wanted: form.get('critique_wanted') === 'on',
+        allow_download: form.get('allow_download') === 'on',
         ...(coverPath ? { cover_path: coverPath } : {})
       }).select().single();
       if (error) { showMessage('Parça oluşturulamadı: ' + error.message, true); return; }
