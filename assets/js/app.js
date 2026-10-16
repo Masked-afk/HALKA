@@ -124,11 +124,13 @@ function renderConsentGate() {
     btn.disabled = true;
     const meta = currentLegalMetadata();
     const { error } = await sb.auth.updateUser({ data: meta });
-    await sb.rpc('record_legal_acceptance', {
-      accepted_terms_version: meta.terms_version,
-      accepted_privacy_version: meta.privacy_version,
-      accepted_community_version: meta.community_rules_version
-    }).catch(() => {});
+    try {
+      await sb.rpc('record_legal_acceptance', {
+        accepted_terms_version: meta.terms_version,
+        accepted_privacy_version: meta.privacy_version,
+        accepted_community_version: meta.community_rules_version
+      });
+    } catch {}
     btn.disabled = false;
     if (error) { showMessage('Kaydedilemedi: ' + error.message, true); return; }
     const { data: refreshed } = await sb.auth.getUser();
@@ -2891,7 +2893,7 @@ async function renderRead(id, query = '') {
     });
     if (chErr) return showMessage('Bölüm eklenemedi: ' + chErr.message, true);
     await sb.from('post_continuations').update({ status: 'accepted' }).eq('id', c.id);
-    await sb.from('notifications').insert({ user_id: c.author_id, actor_id: currentUser.id, type: 'continuation', post_id: post.id }).catch(() => {});
+    try { await sb.from('notifications').insert({ user_id: c.author_id, actor_id: currentUser.id, type: 'continuation', post_id: post.id }); } catch {}
     showMessage('Öneri bölüm olarak yayınlandı.');
     renderRead(post.id);
   }));
@@ -3257,7 +3259,7 @@ async function renderProfile(id) {
     }
   }
   const [avatarUrl, coverUrl] = await Promise.all([signedProfileImage(profile.avatar_path), signedProfileImage(profile.cover_path)]);
-  await sb.rpc('award_feature_badges', { target_user: userId }).catch(() => {});
+  try { await sb.rpc('award_feature_badges', { target_user: userId }); } catch {}
   const badgeStatsPromise = badgeStatsCache ? Promise.resolve({ data: badgeStatsCache }) : sb.rpc('badge_stats');
   const [statsResult, engagementResult, specialBadgesResult, badgeRowsResult, badgeStatsResult] = await Promise.all([
     sb.rpc('get_profile_stats', { target_profile_id: userId }),
