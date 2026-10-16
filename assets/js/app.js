@@ -1490,6 +1490,10 @@ function renderWrite() {
           <input id="allowDownload" name="allow_download" type="checkbox" style="width:auto">
           <label for="allowDownload" style="margin:0">⬇️ Bu eserin indirilmesine izin ver</label>
         </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input id="allowContinuation" name="allow_continuation" type="checkbox" style="width:auto">
+          <label for="allowContinuation" style="margin:0">✍️ Okurlar devam yazabilsin — önerilen bölümler senin onayınla yayınlanır</label>
+        </div>
         <div class="field">
           <label for="tags">Hashtag’ler</label>
           <input id="tags" name="tags" maxlength="160" list="hashtagSuggestions" placeholder="fantastik, günlük, kitap">
@@ -1506,6 +1510,12 @@ function renderWrite() {
             <option value="manga">Manga</option>
             <option value="light_novel">Light Novel</option>
           </select>
+        </div>
+        <div class="field">
+          <label for="seriesPick">Seri <span class="small">(isteğe bağlı)</span></label>
+          <select id="seriesPick" name="series"><option value="">Serisiz</option><option value="__new">+ Yeni seri oluştur…</option></select>
+          <input id="seriesNew" name="series_new" hidden maxlength="120" placeholder="Yeni serinin adı (örn. Çember Evreni)" style="margin-top:6px">
+          <div class="small">Bağlantılı eserlerini bir seri altında topla — okuyucular sırayla gezer.</div>
         </div>
         <div class="field">
           <label for="description">Kısa tanıtım</label>
@@ -1608,6 +1618,16 @@ function renderWrite() {
   document.getElementById('kind').addEventListener('change', e => applyWritingTemplate(e.target.value));
   document.getElementById('coverMakerBtn')?.addEventListener('click', () => openCoverMaker());
 
+  // Seri seçici: kullanıcının serilerini doldur
+  const seriesPick = document.getElementById('seriesPick');
+  document.getElementById('seriesNew').hidden = true;
+  seriesPick.addEventListener('change', () => {
+    document.getElementById('seriesNew').hidden = seriesPick.value !== '__new';
+  });
+  sb.from('post_series').select('id,title').eq('author_id', currentUser.id).order('created_at', { ascending: false })
+    .then(({ data }) => (data || []).forEach(s =>
+      seriesPick.insertAdjacentHTML('beforeend', `<option value="${esc(s.id)}">${esc(s.title)}</option>`)));
+
   const mangaPages = [];
   const renderMangaPages = () => {
     const list = document.getElementById('mangaPagesList');
@@ -1692,6 +1712,7 @@ function renderWrite() {
         pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
         critique_wanted: form.get('critique_wanted') === 'on',
         allow_download: form.get('allow_download') === 'on',
+        allow_continuation: form.get('allow_continuation') === 'on',
         theme_id: new URLSearchParams(location.hash.split('?')[1] || '').get('theme') || null
       };
       if (coverPath) postValues.cover_path = coverPath;
@@ -1702,6 +1723,24 @@ function renderWrite() {
       if (error) {
         if (coverPath) await sb.storage.from('profile-images').remove([coverPath]);
         showMessage('Eser oluşturulamadı: ' + error.message, true); return;
+      }
+      // Seri bağlantısı (isteğe bağlı)
+      const seriesPickVal = String(form.get('series') || '');
+      if (seriesPickVal) {
+        try {
+          let seriesId = seriesPickVal;
+          if (seriesId === '__new') {
+            const sTitle = String(form.get('series_new') || '').trim();
+            if (sTitle) {
+              const { data: ns } = await sb.from('post_series').insert({ author_id: currentUser.id, title: sTitle.slice(0, 120) }).select('id').single();
+              seriesId = ns?.id || null;
+            } else seriesId = null;
+          }
+          if (seriesId) {
+            const { count } = await sb.from('series_items').select('post_id', { count: 'exact', head: true }).eq('series_id', seriesId);
+            await sb.from('series_items').insert({ series_id: seriesId, post_id: post.id, position: count || 0 });
+          }
+        } catch {}
       }
       if (kind === 'manga') {
         for (let i = 0; i < mangaPages.length; i++) {
@@ -1853,6 +1892,30 @@ async function renderRead(id, query = '') {
     const { data: chars } = await sb.from('post_characters').select('*').eq('post_id', id).order('position', { ascending: true });
     characters = chars || [];
   }
+  // Seri üyeliği
+  let seriesInfo = null;
+  {
+    const { data: si } = await sb.from('series_items').select('series_id,position').eq('post_id', id).maybeSingle();
+    if (si) {
+      const { data: s } = await sb.from('post_series').select('id,title,author_id').eq('id', si.series_id).maybeSingle();
+      const { data: sibs } = await sb.from('series_items').select('post_id,position').eq('series_id', si.series_id).order('position');
+      if (s && sibs?.length) seriesInfo = { series: s, items: sibs, idx: sibs.findIndex(x => x.post_id === id) };
+    }
+  }
+  // Devam önerileri
+  let continuations = [];
+  const contProfiles = {};
+  if (currentUser && post.allow_continuation !== undefined) {
+    const { data: cs } = await sb.from('post_continuations').select('*').eq('post_id', id).order('created_at', { ascending: true });
+    continuations = cs || [];
+    const authorIds = [...new Set(continuations.map(c => c.author_id))];
+    if (authorIds.length) {
+      const { data: aps } = await sb.from('profiles').select('id,username,display_name').in('id', authorIds);
+      (aps || []).forEach(p => { contProfiles[p.id] = p; });
+    }
+  }
+  const myContinuation = continuations.find(c => currentUser && c.author_id === currentUser.id);
+  const pendingConts = continuations.filter(c => c.status === 'pending');
   const { data: profile } = await sb.from('profiles').select('id,username,display_name').eq('id', post.author_id).maybeSingle();
   const { data: versions } = await sb.from('post_versions').select('*').eq('post_id', id).order('version_no', { ascending: true });
   await signPostMedia(versions || []);
@@ -2081,6 +2144,11 @@ async function renderRead(id, query = '') {
         <span>· ${esc(formatDate(post.created_at))}</span>
         <span>· ${Number(post.view_count || 0)} görüntülenme</span>
       </div>
+      ${seriesInfo ? `<div class="series-banner" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px;padding:10px 14px;border:1px solid var(--line);border-radius:12px;background:var(--card,#181714)">
+        <span>📚 <a href="#/seri/${encodeURIComponent(seriesInfo.series.id)}" style="font-weight:600">${esc(seriesInfo.series.title)}</a> <span class="small">· serinin ${seriesInfo.idx + 1}. eseri / ${seriesInfo.items.length}</span></span>
+        ${seriesInfo.idx > 0 ? `<a class="btn ghost small" href="#/read/${encodeURIComponent(seriesInfo.items[seriesInfo.idx - 1].post_id)}">‹ Önceki</a>` : ''}
+        ${seriesInfo.idx < seriesInfo.items.length - 1 ? `<a class="btn primary small" href="#/read/${encodeURIComponent(seriesInfo.items[seriesInfo.idx + 1].post_id)}">Sonraki ›</a>` : ''}
+      </div>` : ''}
     </section>
     ${postCoverHTML(post)}${mediaHTML(post)}
     ${versionList.length ? `
@@ -2113,6 +2181,7 @@ async function renderRead(id, query = '') {
         ${currentUser ? '<button class="btn ghost small" id="collectionBtn" type="button">📚 Koleksiyona ekle</button>' : ''}
         ${isOwner ? '<button class="btn ghost small" id="newVersionBtn" type="button">📜 Yeni versiyon</button>' : ''}
         ${isOwner && (post.media_url || post.kind === 'manga') ? `<button class="btn ghost small" id="downloadToggleBtn" type="button" title="Eserin indirilip indirilemeyeceğini seç">⬇️ İndirme: ${post.allow_download ? 'açık' : 'kapalı'}</button>` : ''}
+        ${isOwner && (!post.type || post.type === 'writing') ? `<button class="btn ghost small" id="contToggleBtn" type="button" title="Okurların devam önermesine izin ver/kes">✍️ Devam: ${post.allow_continuation ? 'açık' : 'kapalı'}</button>` : ''}
         ${isOwner && post.kind === 'manga' && (chapters || []).some(c => c.media_url) ? '<button class="btn ghost small" id="mangaCoverBtn" type="button" title="Bir sayfadan kapak üret">🖼️ Kapak üret</button>' : ''}
         ${canReportPost ? '<button class="btn ghost small" id="reportPostToggle" type="button">Eseri bildir</button>' : ''}
         ${isCurrentUserAdmin ? '<button class="btn ghost small" id="adminFlagPost" type="button">⚑ İncelemeye al</button>' : ''}
@@ -2153,6 +2222,37 @@ async function renderRead(id, query = '') {
       </section>`;
     }).join('')}
     </div>
+    ${post.allow_continuation ? `<section class="card" id="contSection">
+      <h3 style="margin-bottom:10px">✍️ Devamını yaz</h3>
+      ${isOwner ? `
+        ${pendingConts.length ? pendingConts.map(c => {
+          const ap = contProfiles[c.author_id];
+          return `<div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
+            <div class="small" style="margin-bottom:6px"><a href="#/user/${encodeURIComponent(c.author_id)}">${esc(displayName(ap, 'Okur'))}</a> öneriyor${c.title ? `: <strong>${esc(c.title)}</strong>` : ''}</div>
+            <div class="chapter-body small" style="max-height:160px;overflow:auto;white-space:pre-wrap">${esc(c.body)}</div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+              <button class="btn primary small cont-accept" data-cont="${esc(c.id)}" type="button">✓ Bölüm olarak yayınla</button>
+              <button class="btn ghost small cont-decline" data-cont="${esc(c.id)}" type="button">Reddet</button>
+            </div>
+          </div>`;
+        }).join('') : '<div class="empty small">Bekleyen devam önerisi yok. Okurlar eserine alternatif devam önerebilir.</div>'}
+        ${continuations.filter(c => c.status === 'accepted').length ? `<div class="small" style="margin-top:8px">✅ ${continuations.filter(c => c.status === 'accepted').length} öneri bölüm olarak yayınlandı.</div>` : ''}
+      ` : currentUser ? `
+        ${myContinuation ? `
+          <div class="small" style="margin-bottom:8px">
+            ${myContinuation.status === 'pending' ? '⏳ Devam önerin yazarın onayını bekliyor.' : myContinuation.status === 'accepted' ? '🎉 Devam önerin bölüm olarak yayınlandı!' : '❌ Önerin bu eser için kabul edilmedi — yine de istersen yeni bir tane gönderebilirsin.'}
+            ${myContinuation.status === 'pending' ? `<button class="btn ghost small" id="contWithdrawBtn" type="button">Geri çek</button>` : ''}
+          </div>` : ''}
+        ${!myContinuation || myContinuation.status === 'declined' ? `
+          <p class="small">Bu esere alternatif bir devam bölümü önerebilirsin — yazar onaylarsa adınla yayınlanır.</p>
+          <form id="contForm">
+            <div class="field"><input name="cont_title" maxlength="120" placeholder="Devam başlığı (isteğe bağlı)"></div>
+            <div class="field"><textarea name="cont_body" required maxlength="20000" placeholder="Devamı yaz…" style="min-height:160px"></textarea></div>
+            <button class="btn primary" type="submit">Öneriyi gönder</button>
+            <div id="contMessage" class="message"></div>
+          </form>` : ''}
+      ` : '<div class="empty small">Devam yazmak için <a href="#/auth">giriş yap</a>.</div>'}
+    </section>` : ''}
     ${characters.length ? `<section class="card character-glossary">
       <h3 style="margin-bottom:10px">👥 Karakterler</h3>
       <div class="char-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
@@ -2390,6 +2490,54 @@ async function renderRead(id, query = '') {
     showMessage(next ? 'İndirme açıldı — imzalı link üzerinden indirilebilir.' : 'İndirme kapatıldı.');
     renderRead(post.id);
   });
+  document.getElementById('contToggleBtn')?.addEventListener('click', async () => {
+    const next = !post.allow_continuation;
+    const { error } = await sb.from('posts').update({ allow_continuation: next }).eq('id', post.id).eq('author_id', currentUser.id);
+    if (error) return showMessage('Ayar güncellenemedi: ' + error.message, true);
+    renderRead(post.id);
+  });
+  document.getElementById('contForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const f = e.target;
+    const body = String(f.cont_body.value || '').trim();
+    if (!body) return;
+    const { error } = await sb.from('post_continuations').insert({
+      post_id: post.id, author_id: currentUser.id,
+      title: String(f.cont_title.value || '').trim().slice(0, 120) || null, body
+    });
+    if (error) {
+      const m = document.getElementById('contMessage');
+      if (m) { m.textContent = 'Öneri gönderilemedi: ' + error.message; m.className = 'message error'; }
+      return;
+    }
+    showMessage('Devam önerin yazara iletildi.');
+    renderRead(post.id);
+  });
+  document.getElementById('contWithdrawBtn')?.addEventListener('click', async () => {
+    if (!myContinuation) return;
+    await sb.from('post_continuations').delete().eq('id', myContinuation.id).eq('author_id', currentUser.id);
+    renderRead(post.id);
+  });
+  app.querySelectorAll('.cont-accept').forEach(btn => btn.addEventListener('click', async () => {
+    const c = continuations.find(x => x.id === btn.dataset.cont);
+    if (!c) return;
+    const ap = contProfiles[c.author_id];
+    const maxPos = Math.max(0, ...(chapters || []).map(x => Number(x.position) || 0));
+    const { error: chErr } = await sb.from('chapters').insert({
+      post_id: post.id, position: maxPos + 1,
+      title: c.title || `Devam — ${displayName(ap, 'Okur')}`,
+      body: `*(Devam önerisi — @${ap?.username || 'okur'})*\n\n${c.body}`
+    });
+    if (chErr) return showMessage('Bölüm eklenemedi: ' + chErr.message, true);
+    await sb.from('post_continuations').update({ status: 'accepted' }).eq('id', c.id);
+    await sb.from('notifications').insert({ user_id: c.author_id, actor_id: currentUser.id, type: 'continuation', post_id: post.id }).catch(() => {});
+    showMessage('Öneri bölüm olarak yayınlandı.');
+    renderRead(post.id);
+  }));
+  app.querySelectorAll('.cont-decline').forEach(btn => btn.addEventListener('click', async () => {
+    await sb.from('post_continuations').update({ status: 'declined' }).eq('id', btn.dataset.cont);
+    renderRead(post.id);
+  }));
   document.querySelectorAll('.version-chip').forEach(btn => {
     btn.addEventListener('click', () => {
       const panel = document.getElementById('versionPanel');
@@ -6812,6 +6960,92 @@ async function renderCommunity(id, query = '') {
   }
 }
 
+async function renderSeries(id) {
+  app.innerHTML = loadingBlock('Seri açılıyor…');
+  const { data: series, error } = await sb.from('post_series').select('*').eq('id', id).maybeSingle();
+  if (error || !series) {
+    app.innerHTML = `<div class="empty">Seri bulunamadı.${error ? `<br><span class="small">${esc(error.message)}</span>` : ''}</div>`;
+    return;
+  }
+  const { data: items } = await sb.from('series_items').select('post_id,position').eq('series_id', id).order('position');
+  const rows = items || [];
+  let posts = [];
+  if (rows.length) {
+    const { data: ps } = await sb.from('posts').select('*').in('id', rows.map(r => r.post_id));
+    posts = ps || [];
+    await signPostMedia(posts);
+    posts = await attachBookCovers(posts);
+  }
+  const postMap = Object.fromEntries(posts.map(p => [p.id, p]));
+  const { data: author } = await sb.from('profiles').select('id,username,display_name').eq('id', series.author_id).maybeSingle();
+  const isOwner = currentUser?.id === series.author_id;
+  let myPosts = [];
+  if (isOwner) {
+    const { data: mp } = await sb.from('posts').select('id,title,kind,type').eq('author_id', currentUser.id).order('created_at', { ascending: false });
+    myPosts = (mp || []).filter(p => !rows.some(r => r.post_id === p.id));
+  }
+
+  app.innerHTML = `
+    <p><a href="#/user/${encodeURIComponent(series.author_id)}">← ${esc(displayName(author, 'Yazar'))}</a></p>
+    <section class="hero">
+      <div class="eyebrow">📚 Seri</div>
+      <h1>${esc(series.title)}</h1>
+      <p class="subtitle">${esc(series.description || '')}</p>
+      <p class="meta">${rows.length} eser · ${esc(formatDate(series.created_at))}</p>
+      ${isOwner ? `<div class="post-actions"><button class="btn danger small" id="seriesDeleteBtn" type="button">Seriyi sil</button></div>` : ''}
+    </section>
+    <section class="card">
+      <div class="post-list">
+        ${rows.map((r, i) => {
+          const p = postMap[r.post_id];
+          if (!p) return '';
+          return `<div class="member-row">
+            <span class="small" style="width:26px;text-align:center;color:var(--gold2)">${i + 1}</span>
+            <a class="member-id" href="#/read/${encodeURIComponent(p.id)}">${postCoverHTML(p)}<span>${esc(p.title || 'Başlıksız eser')}<br><span class="small">${esc(quickTypeLabel(p))} · ${esc(formatDate(p.created_at))}</span></span></a>
+            ${isOwner ? `<span style="display:flex;gap:4px">
+              <button class="btn ghost small series-move" data-post="${esc(p.id)}" data-dir="-1" ${i === 0 ? 'disabled' : ''}>↑</button>
+              <button class="btn ghost small series-move" data-post="${esc(p.id)}" data-dir="1" ${i === rows.length - 1 ? 'disabled' : ''}>↓</button>
+              <button class="btn ghost small series-remove" data-post="${esc(p.id)}" title="Seriden çıkar">🗑</button>
+            </span>` : ''}
+          </div>`;
+        }).join('') || '<div class="empty">Bu seride henüz eser yok.</div>'}
+      </div>
+      ${isOwner && myPosts.length ? `<div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <select id="seriesAddPick" style="flex:1;min-width:180px">${myPosts.map(p => `<option value="${esc(p.id)}">${esc(p.title || 'Başlıksız')} (${esc(quickTypeLabel(p))})</option>`).join('')}</select>
+        <button class="btn ghost small" id="seriesAddBtn" type="button">+ Seriye ekle</button>
+      </div>` : ''}
+    </section>`;
+
+  document.getElementById('seriesAddBtn')?.addEventListener('click', async () => {
+    const postId = document.getElementById('seriesAddPick')?.value;
+    if (!postId) return;
+    const { error: e2 } = await sb.from('series_items').insert({ series_id: id, post_id: postId, position: rows.length });
+    if (e2) return alert('Eklenemedi: ' + e2.message);
+    renderSeries(id);
+  });
+  app.querySelectorAll('.series-remove').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Eser seriden çıkarılsın mı?')) return;
+    await sb.from('series_items').delete().eq('series_id', id).eq('post_id', btn.dataset.post);
+    renderSeries(id);
+  }));
+  app.querySelectorAll('.series-move').forEach(btn => btn.addEventListener('click', async () => {
+    const it = rows.find(x => x.post_id === btn.dataset.post);
+    const swap = rows[rows.indexOf(it) + Number(btn.dataset.dir)];
+    if (!it || !swap) return;
+    await Promise.all([
+      sb.from('series_items').update({ position: swap.position }).eq('series_id', id).eq('post_id', it.post_id),
+      sb.from('series_items').update({ position: it.position }).eq('series_id', id).eq('post_id', swap.post_id)
+    ]);
+    renderSeries(id);
+  }));
+  document.getElementById('seriesDeleteBtn')?.addEventListener('click', async () => {
+    if (!confirm('Seri silinsin mi? (Eserler silinmez, yalnızca grup dağılır)')) return;
+    const { error: e2 } = await sb.from('post_series').delete().eq('id', id).eq('author_id', currentUser.id);
+    if (e2) return alert('Silinemedi: ' + e2.message);
+    location.hash = '#/';
+  });
+}
+
 function parseRoute() {
   const raw = location.hash.replace(/^#/, '') || '/';
   const [path, query = ''] = raw.split('?');
@@ -6867,6 +7101,7 @@ async function route() {
   if (view === 'bugreport') return renderBugReport();
   if (view === 'chat') return renderChat(arg || '', query);
   if (view === 'topluluk') return renderCommunity(safeDecode(arg), query);
+  if (view === 'seri') return renderSeries(safeDecode(arg));
   if (view === 'koleksiyonlar') return renderCollections();
   if (view === 'ozet') return renderOzet();
   if (view === 'relay') return arg ? renderRelay(safeDecode(arg)) : renderRelayList();
