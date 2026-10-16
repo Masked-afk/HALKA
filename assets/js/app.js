@@ -1848,6 +1848,11 @@ async function renderRead(id, query = '') {
 
   const { data: chapters, error: chapterError } = await sb.from('chapters').select('*').eq('post_id', id).order('position', { ascending: true });
   await signPostMedia(chapters || []);
+  let characters = [];
+  if (isChapteredKind(post.kind)) {
+    const { data: chars } = await sb.from('post_characters').select('*').eq('post_id', id).order('position', { ascending: true });
+    characters = chars || [];
+  }
   const { data: profile } = await sb.from('profiles').select('id,username,display_name').eq('id', post.author_id).maybeSingle();
   const { data: versions } = await sb.from('post_versions').select('*').eq('post_id', id).order('version_no', { ascending: true });
   await signPostMedia(versions || []);
@@ -2108,16 +2113,34 @@ async function renderRead(id, query = '') {
         ${currentUser ? '<button class="btn ghost small" id="collectionBtn" type="button">📚 Koleksiyona ekle</button>' : ''}
         ${isOwner ? '<button class="btn ghost small" id="newVersionBtn" type="button">📜 Yeni versiyon</button>' : ''}
         ${isOwner && (post.media_url || post.kind === 'manga') ? `<button class="btn ghost small" id="downloadToggleBtn" type="button" title="Eserin indirilip indirilemeyeceğini seç">⬇️ İndirme: ${post.allow_download ? 'açık' : 'kapalı'}</button>` : ''}
+        ${isOwner && post.kind === 'manga' && (chapters || []).some(c => c.media_url) ? '<button class="btn ghost small" id="mangaCoverBtn" type="button" title="Bir sayfadan kapak üret">🖼️ Kapak üret</button>' : ''}
         ${canReportPost ? '<button class="btn ghost small" id="reportPostToggle" type="button">Eseri bildir</button>' : ''}
         ${isCurrentUserAdmin ? '<button class="btn ghost small" id="adminFlagPost" type="button">⚑ İncelemeye al</button>' : ''}
     </div>
     ${canReportPost ? reportFormHTML('post', post.id, 'report-form', 'postReportForm') : ''}
     ${chapterError ? `<div class="empty">Bölümler yüklenemedi.<br><span class="small">${esc(chapterError.message)}</span></div>` : ''}
+    ${post.kind === 'manga' && (chapters || []).filter(c => c.media_url).length > 1 ? `
+      <div class="manga-mode-bar" id="mangaModeBar" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px">
+        <button class="chip" data-mode="scroll" type="button">📜 Dikey akış</button>
+        <button class="chip" data-mode="page" type="button">📄 Tek sayfa</button>
+        <button class="chip" data-mode="rtl" type="button">📄 Sağdan sola ↩</button>
+      </div>
+      <div id="mangaPageNav" class="manga-page-nav" hidden style="display:flex;gap:10px;align-items:center;justify-content:center;margin-bottom:14px">
+        <button class="btn ghost small" id="mpPrev" type="button">‹ Önceki</button>
+        <span class="small" id="mpIndicator"></span>
+        <button class="btn ghost small" id="mpNext" type="button">Sonraki ›</button>
+      </div>` : ''}
+    <div id="chaptersWrap">
     ${(chapters || []).map((ch, i) => {
       const chComments = commentsByChapter.get(ch.id) || [];
       return `
       <section class="chapter" id="chapter-${i}" data-chapter-index="${i}">
         <h3>${esc(ch.title || 'Bölüm')}</h3>
+        ${isOwner && isChapteredKind(post.kind) ? `<div class="page-admin" style="display:flex;gap:6px;margin:4px 0 8px">
+          <button class="btn ghost small ch-move" data-ch="${esc(ch.id)}" data-dir="-1" type="button" title="Yukarı taşı" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button class="btn ghost small ch-move" data-ch="${esc(ch.id)}" data-dir="1" type="button" title="Aşağı taşı" ${i === (chapters || []).length - 1 ? 'disabled' : ''}>↓</button>
+          <button class="btn ghost small ch-del" data-ch="${esc(ch.id)}" data-title="${esc(ch.title || 'Sayfa')}" type="button" title="Sil">🗑</button>
+        </div>` : ''}
         ${ch.media_url ? `<img class="manga-page-img" src="${esc(ch.media_url)}" alt="${esc(ch.title || 'Manga sayfası')}" loading="lazy"${post.allow_download ? '' : ' oncontextmenu="return false" draggable="false"'}>` : ''}
         ${ch.body ? `<div class="chapter-body">${renderParagraphs(ch.body, ch.id, paragraphCounts[ch.id] || {}, post.kind)}</div>` : ''}
         <div class="chapter-comments">
@@ -2129,6 +2152,13 @@ async function renderRead(id, query = '') {
         </div>
       </section>`;
     }).join('')}
+    </div>
+    ${characters.length ? `<section class="card character-glossary">
+      <h3 style="margin-bottom:10px">👥 Karakterler</h3>
+      <div class="char-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px">
+        ${characters.map(c => `<div class="char-item" style="border:1px solid var(--line);border-radius:10px;padding:8px 12px"><strong>${esc(c.name)}</strong>${c.info ? `<div class="small" style="margin-top:2px">${esc(c.info)}</div>` : ''}</div>`).join('')}
+      </div>
+    </section>` : ''}
     ${currentUser && (chapters || []).length > 0 ? '<div class="continue-reading" id="continueReadingBar" hidden><span id="continueReadingText"></span><button class="btn primary small" id="continueReadingBtn" type="button">Kaldığın yerden devam et</button></div>' : ''}
     ${(!chapterError && !post.media_url && !post.cover_path && !(chapters || []).length) ? '<div class="empty">Bu esere henüz bölüm eklenmemiş.</div>' : ''}
 
@@ -2174,10 +2204,28 @@ async function renderRead(id, query = '') {
           <div class="field">
             <label for="cbody">Metin</label>
             ${isChapteredKind(post.kind) ? '<div class="rich-tools" id="newChapterTools"><button class="btn ghost small" type="button" data-wrap="**">Kalın: **…**</button><button class="btn ghost small" type="button" data-wrap="()">İtalik: (…)</button></div>' : ''}
-            <textarea id="cbody" name="cbody" required></textarea>
-          </div>`}
+            <textarea id="cbody" name="cbody" ${post.kind === 'light_novel' ? '' : 'required'}></textarea>
+            ${post.kind === 'light_novel' ? '<div class="small">Light novel&#39;de metin boş bırakılırsa yalnızca illüstrasyon sayfası eklenir.</div>' : ''}
+          </div>
+          ${post.kind === 'light_novel' ? `
+          <div class="field">
+            <label for="cIllustration">🎑 İllüstrasyon (isteğe bağlı)</label>
+            <input id="cIllustration" name="illustration" type="file" accept="image/jpeg,image/png,image/webp">
+            <div class="small">Bölüm sonrasına görsel sayfa olarak eklenir — light novel geleneği.</div>
+          </div>` : ''}`}
           <button class="btn primary" type="submit">${post.kind === 'manga' ? 'Sayfaları ekle' : 'Bölümü ekle'}</button>
           <div id="message" class="message"></div>
+        </form>
+      </section>` : ''}
+      ${isChapteredKind(post.kind) ? `<section class="card">
+        <h3>👥 Karakter sözlüğü</h3>
+        <div id="charList" style="display:grid;gap:6px;margin-bottom:10px">
+          ${characters.length ? characters.map(c => `<div style="display:flex;gap:8px;align-items:center"><strong>${esc(c.name)}</strong><span class="small" style="flex:1">${esc(c.info || '')}</span><button class="btn ghost small char-del" data-char="${esc(c.id)}" type="button" title="Sil">🗑</button></div>`).join('') : '<div class="empty small">Henüz karakter eklenmemiş.</div>'}
+        </div>
+        <form id="charForm" style="display:flex;gap:8px;flex-wrap:wrap">
+          <input name="cname" required maxlength="80" placeholder="Karakter adı" style="flex:1;min-width:140px">
+          <input name="cinfo" maxlength="400" placeholder="Kısa bilgi (isteğe bağlı)" style="flex:2;min-width:180px">
+          <button class="btn primary small" type="submit">Ekle</button>
         </form>
       </section>` : ''}
       <p><button class="btn danger" id="deleteBtn" type="button">Eseri sil</button></p>` : ''}
@@ -2456,14 +2504,168 @@ async function renderRead(id, query = '') {
       renderRead(id);
       return;
     }
-    const { error: insertError } = await sb.from('chapters').insert({
-      post_id: post.id, position: last + 1,
-      title: String(form.get('ctitle') || '').trim(),
-      body: String(form.get('cbody') || '').trim()
-    });
-    if (insertError) return showMessage('Bölüm eklenemedi: ' + insertError.message, true);
+    const body = String(form.get('cbody') || '').trim();
+    const illFile = post.kind === 'light_novel' ? (document.getElementById('cIllustration')?.files?.[0] || null) : null;
+    if (post.kind === 'light_novel' && !body && !illFile) return showMessage('Metin yaz veya illüstrasyon ekle.', true);
+    let nextPos = last + 1;
+    if (body) {
+      const { error: insertError } = await sb.from('chapters').insert({
+        post_id: post.id, position: nextPos++,
+        title: String(form.get('ctitle') || '').trim(),
+        body
+      });
+      if (insertError) return showMessage('Bölüm eklenemedi: ' + insertError.message, true);
+    }
+    if (illFile) {
+      const img = await compressImage(illFile, 1600);
+      const ext = img.type === 'image/webp' ? 'webp' : 'png';
+      const path = `${currentUser.id}/ln-illustrations/${post.id}/${Date.now()}.${ext}`;
+      const up = await sb.storage.from('post-media').upload(path, img, { contentType: img.type, upsert: false });
+      if (up.error) return showMessage('İllüstrasyon yüklenemedi: ' + up.error.message, true);
+      const mediaUrl = sb.storage.from('post-media').getPublicUrl(path).data.publicUrl;
+      const { error: illErr } = await sb.from('chapters').insert({
+        post_id: post.id, position: nextPos,
+        title: String(form.get('ctitle') || '').trim() || 'İllüstrasyon',
+        body: '', media_url: mediaUrl
+      });
+      if (illErr) return showMessage('İllüstrasyon kaydedilemedi: ' + illErr.message, true);
+    }
     renderRead(id);
   });
+
+  // Manga sayfa yönetimi: sırala / sil
+  app.querySelectorAll('.ch-move').forEach(btn => btn.addEventListener('click', async () => {
+    const ch = chapters.find(c => c.id === btn.dataset.ch);
+    if (!ch) return;
+    const sorted = [...chapters].sort((a, b) => (a.position || 0) - (b.position || 0));
+    const idx = sorted.indexOf(ch);
+    const swap = sorted[idx + Number(btn.dataset.dir)];
+    if (!swap) return;
+    const [{ error: e1 }, { error: e2 }] = await Promise.all([
+      sb.from('chapters').update({ position: swap.position }).eq('id', ch.id),
+      sb.from('chapters').update({ position: ch.position }).eq('id', swap.id)
+    ]);
+    if (e1 || e2) return showMessage('Sıralama güncellenemedi.', true);
+    renderRead(id);
+  }));
+  app.querySelectorAll('.ch-del').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm(`"${btn.dataset.title}" silinsin mi?`)) return;
+    const ch = chapters.find(c => c.id === btn.dataset.ch);
+    const { error } = await sb.from('chapters').delete().eq('id', btn.dataset.ch);
+    if (error) return showMessage('Silinemedi: ' + error.message, true);
+    const m = ch?.media_url?.match(/\/post-media\/([^?]+)/);
+    if (m) await sb.storage.from('post-media').remove([decodeURIComponent(m[1])]);
+    renderRead(id);
+  }));
+
+  // Manga okuma modu: dikey akış / tek sayfa / sağdan sola
+  const modeBar = document.getElementById('mangaModeBar');
+  if (modeBar) {
+    const wrap = document.getElementById('chaptersWrap');
+    const nav = document.getElementById('mangaPageNav');
+    const ind = document.getElementById('mpIndicator');
+    const sections = [...wrap.querySelectorAll('.chapter')];
+    let cur = 0;
+    let mode = localStorage.getItem('halka_manga_mode') || 'scroll';
+    const apply = () => {
+      modeBar.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.mode === mode));
+      const paged = mode !== 'scroll';
+      nav.hidden = !paged;
+      nav.style.direction = mode === 'rtl' ? 'rtl' : 'ltr';
+      sections.forEach((s, i) => { s.hidden = paged && i !== cur; });
+      if (paged) ind.textContent = `${cur + 1} / ${sections.length}`;
+    };
+    const go = d => {
+      cur = Math.min(sections.length - 1, Math.max(0, cur + d));
+      apply();
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    modeBar.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+      mode = c.dataset.mode;
+      localStorage.setItem('halka_manga_mode', mode);
+      apply();
+    }));
+    document.getElementById('mpPrev').addEventListener('click', () => go(-1));
+    document.getElementById('mpNext').addEventListener('click', () => go(1));
+    const keyNav = e => {
+      if (mode === 'scroll' || !document.getElementById('chaptersWrap')) return document.removeEventListener('keydown', keyNav);
+      const fwd = mode === 'rtl' ? e.key === 'ArrowLeft' : e.key === 'ArrowRight';
+      const back = mode === 'rtl' ? e.key === 'ArrowRight' : e.key === 'ArrowLeft';
+      if (fwd) go(1); else if (back) go(-1);
+    };
+    document.addEventListener('keydown', keyNav);
+    apply();
+  }
+
+  // Manga kapak üretici: sayfa seç → başlık bandıyla kompoze et → cover_path'e yaz
+  document.getElementById('mangaCoverBtn')?.addEventListener('click', () => {
+    const pages = chapters.filter(c => c.media_url);
+    const modal = document.createElement('div');
+    modal.className = 'badge-modal-backdrop';
+    modal.innerHTML = `<div class="card badge-modal" role="dialog" aria-label="Kapak üret" style="max-width:520px;text-align:left">
+      <button class="badge-modal-close" type="button" aria-label="Kapat">✕</button>
+      <h3 style="text-align:center;margin:0 0 10px">🖼️ Kapak üret</h3>
+      <p class="small">Kapağa dönüşecek sayfayı seç — başlık alt banda işlenir.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;max-height:50vh;overflow-y:auto">
+        ${pages.map((p, i) => `<img src="${esc(p.media_url)}" data-i="${i}" alt="${esc(p.title || 'Sayfa')}" style="width:100%;aspect-ratio:2/3;object-fit:cover;border-radius:8px;cursor:pointer;border:2px solid transparent" class="cover-pick">`).join('')}
+      </div>
+      <div id="coverMsg" class="message" aria-live="polite"></div>
+    </div>`;
+    document.body.appendChild(modal);
+    const closeM = () => modal.remove();
+    modal.addEventListener('click', e => { if (e.target === modal) closeM(); });
+    modal.querySelector('.badge-modal-close').addEventListener('click', closeM);
+    modal.querySelectorAll('.cover-pick').forEach(img => img.addEventListener('click', async () => {
+      const msg = modal.querySelector('#coverMsg');
+      msg.textContent = 'Kapak üretiliyor…'; msg.className = 'message';
+      try {
+        const src = await createImageBitmap(await (await fetch(pages[Number(img.dataset.i)].media_url)).blob());
+        const cv = document.createElement('canvas'); cv.width = 800; cv.height = 1200;
+        const c = cv.getContext('2d');
+        const s = Math.max(800 / src.width, 1200 / src.height);
+        c.drawImage(src, (800 - src.width * s) / 2, (1200 - src.height * s) / 2, src.width * s, src.height * s);
+        const g = c.createLinearGradient(0, 780, 0, 1200);
+        g.addColorStop(0, '#0000'); g.addColorStop(1, '#000d');
+        c.fillStyle = g; c.fillRect(0, 780, 800, 420);
+        c.fillStyle = '#f4e8c8'; c.textAlign = 'center';
+        c.font = "700 64px 'Fredoka','Segoe UI',sans-serif";
+        const words = (post.title || 'Manga').split(' ');
+        const lines = []; let line = '';
+        words.forEach(w => { const t = line ? line + ' ' + w : w; if (c.measureText(t).width > 700 && line) { lines.push(line); line = w; } else line = t; });
+        if (line) lines.push(line);
+        lines.slice(0, 3).forEach((l, i) => c.fillText(l, 400, 1200 - 90 - (lines.slice(0, 3).length - 1 - i) * 78));
+        const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+        const path = `${currentUser.id}/book-covers/${post.id}-${Date.now()}.png`;
+        const up = await sb.storage.from('profile-images').upload(path, blob, { contentType: 'image/png', upsert: false });
+        if (up.error) throw up.error;
+        const { error } = await sb.from('posts').update({ cover_path: path }).eq('id', post.id).eq('author_id', currentUser.id);
+        if (error) throw error;
+        msg.textContent = 'Kapak kaydedildi!';
+        setTimeout(() => { closeM(); renderRead(id); }, 600);
+      } catch (err) {
+        msg.textContent = 'Kapak üretilemedi: ' + (err.message || 'hata'); msg.className = 'message error';
+      }
+    }));
+  });
+
+  // Karakter sözlüğü
+  document.getElementById('charForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const form = new FormData(e.target);
+    const { error } = await sb.from('post_characters').insert({
+      post_id: post.id,
+      name: String(form.get('cname') || '').trim(),
+      info: String(form.get('cinfo') || '').trim() || null,
+      position: characters.length
+    });
+    if (error) return showMessage('Karakter eklenemedi: ' + error.message, true);
+    renderRead(id);
+  });
+  app.querySelectorAll('.char-del').forEach(btn => btn.addEventListener('click', async () => {
+    const { error } = await sb.from('post_characters').delete().eq('id', btn.dataset.char);
+    if (error) return showMessage('Silinemedi: ' + error.message, true);
+    renderRead(id);
+  }));
 
   document.getElementById('deleteBtn')?.addEventListener('click', async () => {
     if (!confirm('Bu eser ve tüm bölümleri silinsin mi?')) return;
@@ -4322,17 +4524,24 @@ function openCoverMaker() {
   });
 }
 
-// ---- Manga panel kompozitörü: şablon seç → panele çiz/görsel koy → balon ekle → PNG ----
+// ---- Manga panel kompozitörü v2: hazır/özel şablon → çiz/görsel/ton → balon → PNG ----
 function openPanelComposer(onDone) {
-  const W = 760, H = 1080, GUT = 14, BORDER = 5;
+  const W = 760, H = 1080, GUT = 14;
+  let BORDER = 5;
   const LAYOUTS = {
     '1 tam sayfa': [[0, 0, 1, 1]],
     '2 dikey': [[0, 0, 1, .5], [0, .5, 1, .5]],
     '2 yatay': [[0, 0, .5, 1], [.5, 0, .5, 1]],
     '3 (üst + 2 alt)': [[0, 0, 1, .5], [0, .5, .5, .5], [.5, .5, .5, .5]],
     '4 ızgara': [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]],
-    '6 ızgara': [[0, 0, .5, 1 / 3], [.5, 0, .5, 1 / 3], [0, 1 / 3, .5, 1 / 3], [.5, 1 / 3, .5, 1 / 3], [0, 2 / 3, .5, 1 / 3], [.5, 2 / 3, .5, 1 / 3]]
+    '6 ızgara': [[0, 0, .5, 1 / 3], [.5, 0, .5, 1 / 3], [0, 1 / 3, .5, 1 / 3], [.5, 1 / 3, .5, 1 / 3], [0, 2 / 3, .5, 1 / 3], [.5, 2 / 3, .5, 1 / 3]],
+    'Özel düzen': null
   };
+  const SPLITS = {
+    '1': [1], '2': [.5, .5], '2 (sol geniş)': [.66, .34], '2 (sağ geniş)': [.34, .66],
+    '3': [1 / 3, 1 / 3, 1 / 3], '4': [.25, .25, .25, .25]
+  };
+  const TONES = ['Yok', 'Nokta (seyrek)', 'Nokta (sık)', 'Çizgi (yatay)', 'Çizgi (çapraz)', 'Gradyan'];
   const modal = document.createElement('div');
   modal.className = 'badge-modal-backdrop';
   modal.innerHTML = `
@@ -4342,25 +4551,45 @@ function openPanelComposer(onDone) {
       <div class="canvas-tool-row" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">
         <label class="small">Şablon</label>
         <select id="pcLayout">${Object.keys(LAYOUTS).map(k => `<option>${k}</option>`).join('')}</select>
-        <button class="btn ghost small pc-tool on" data-tool="pen" type="button">✏️</button>
-        <button class="btn ghost small pc-tool" data-tool="marker" type="button">🖊️</button>
-        <button class="btn ghost small pc-tool" data-tool="eraser" type="button">🧽</button>
-        <button class="btn ghost small pc-tool" data-tool="bubble" type="button">💬</button>
-        <button class="btn ghost small pc-tool" data-tool="move" type="button">✋</button>
-        <input type="range" id="pcSize" min="2" max="24" value="4" title="Boyut" style="width:70px">
+        <button class="btn ghost small pc-tool on" data-tool="pen" type="button" title="Kalem">✏️</button>
+        <button class="btn ghost small pc-tool" data-tool="marker" type="button" title="Fosforlu">🖊️</button>
+        <button class="btn ghost small pc-tool" data-tool="eraser" type="button" title="Silgi">🧽</button>
+        <button class="btn ghost small pc-tool" data-tool="tone" type="button" title="Ton dokusu">▩</button>
+        <button class="btn ghost small pc-tool" data-tool="bubble" type="button" title="Balon">💬</button>
+        <button class="btn ghost small pc-tool" data-tool="move" type="button" title="Taşı">✋</button>
+        <input type="range" id="pcSize" min="2" max="24" value="4" title="Çizgi boyutu" style="width:60px">
         <input type="color" id="pcColor" value="#111111" title="Renk">
-        <button class="btn ghost small" id="pcImgBtn" type="button">🖼️</button>
+        <label class="small" title="Panel çerçevesi">Çerçeve</label>
+        <input type="range" id="pcBorder" min="0" max="12" value="5" style="width:55px">
+        <button class="btn ghost small" id="pcImgBtn" type="button" title="Panele görsel">🖼️</button>
         <input id="pcImgFile" type="file" accept="image/jpeg,image/png,image/webp" hidden>
-        <button class="btn ghost small" id="pcUndo" type="button">↩</button>
-        <button class="btn ghost small" id="pcClear" type="button">🗑</button>
+        <button class="btn ghost small" id="pcUndo" type="button" title="Geri al">↩</button>
+        <button class="btn ghost small" id="pcClear" type="button" title="Temizle">🗑</button>
+      </div>
+      <div id="pcCustomBar" style="display:none;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <div id="pcRows" style="display:grid;gap:6px;width:100%"></div>
+        <button class="btn ghost small" id="pcAddRow" type="button">+ Satır ekle</button>
+        <span class="small">Her satırın bölünmesini ve yüksekliğini seç — paneller otomatik dizilir.</span>
       </div>
       <div id="pcBubbleBar" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
         <select id="pcBubbleType">
           <option value="speech">Konuşma</option><option value="thought">Düşünce</option>
           <option value="shout">Bağırma</option><option value="narration">Anlatıcı</option>
         </select>
-        <input id="pcBubbleText" maxlength="120" placeholder="Balon metni…" style="flex:1;min-width:160px">
+        <select id="pcBubbleTail" title="Kuyruk yönü">
+          <option value="down">Kuyruk ↓</option><option value="up">Kuyruk ↑</option>
+          <option value="left">Kuyruk ←</option><option value="right">Kuyruk →</option>
+        </select>
+        <select id="pcBubbleSize" title="Yazı boyutu">
+          <option value="14">S</option><option value="18" selected>M</option>
+          <option value="24">L</option><option value="30">XL</option>
+        </select>
+        <input id="pcBubbleText" maxlength="120" placeholder="Balon metni…" style="flex:1;min-width:140px">
         <span class="small">Sonra panelde bir yere tıkla.</span>
+      </div>
+      <div id="pcToneBar" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <select id="pcTone">${TONES.map(t => `<option>${t}</option>`).join('')}</select>
+        <span class="small">Panelde bir yere tıkla — ton arka plana işlenir.</span>
       </div>
       <canvas id="pcCanvas" width="${W}" height="${H}" class="pc-canvas"></canvas>
       <div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
@@ -4375,16 +4604,59 @@ function openPanelComposer(onDone) {
 
   const canvas = modal.querySelector('#pcCanvas');
   const ctx = canvas.getContext('2d');
-  let panels = [];          // {x,y,w,h, img, strokes:[], bubbles:[]}
+  let panels = [];          // {x,y,w,h, img, tone, strokes:[], bubbles:[]}
   let tool = 'pen', activePanel = -1, drawing = false, dragBubble = null;
-  const ops = [];           // undo geçmişi: {type:'stroke'|'bubble'|'img', panel, ref}
+  const ops = [];           // undo geçmişi: {type:'stroke'|'bubble'|'img'|'tone', panel, ref/prev}
+  let customRows = [{ split: '1', h: 1 }, { split: '2', h: 1 }];
+
+  // Ton dokusu desenleri (küçük tekrarlanan tile)
+  const toneCache = {};
+  const toneCanvas = name => {
+    if (toneCache[name]) return toneCache[name];
+    const t = document.createElement('canvas');
+    const s = { 'Nokta (seyrek)': 14, 'Nokta (sık)': 8, 'Çizgi (yatay)': 10, 'Çizgi (çapraz)': 12 }[name] || 8;
+    t.width = t.height = s;
+    const c = t.getContext('2d');
+    c.strokeStyle = c.fillStyle = '#111';
+    if (name.startsWith('Nokta')) {
+      c.beginPath(); c.arc(s / 2, s / 2, name.includes('sık') ? 1.6 : 1.9, 0, Math.PI * 2); c.fill();
+    } else if (name === 'Çizgi (yatay)') {
+      c.lineWidth = 1.4; c.beginPath(); c.moveTo(0, s / 2); c.lineTo(s, s / 2); c.stroke();
+    } else if (name === 'Çizgi (çapraz)') {
+      c.lineWidth = 1.2; c.beginPath(); c.moveTo(0, s); c.lineTo(s, 0); c.stroke();
+      c.beginPath(); c.moveTo(-s, 0); c.lineTo(0, -s); c.stroke();
+      c.beginPath(); c.moveTo(s, 2 * s); c.lineTo(2 * s, s); c.stroke();
+    }
+    toneCache[name] = t;
+    return t;
+  };
+
+  const mkPanel = (x, y, w, h) => ({
+    x: x * W + GUT / 2, y: y * H + GUT / 2,
+    w: w * W - GUT, h: h * H - GUT,
+    img: null, tone: null, strokes: [], bubbles: []
+  });
+
+  const buildCustom = () => {
+    const rows = customRows.filter(r => SPLITS[r.split]);
+    if (!rows.length) rows.push({ split: '1', h: 1 });
+    const totalH = rows.reduce((m, r) => m + (r.h || 1), 0);
+    let y = 0;
+    panels = [];
+    rows.forEach(r => {
+      const rh = (r.h || 1) / totalH;
+      const widths = SPLITS[r.split];
+      let x = 0;
+      widths.forEach(wf => { panels.push(mkPanel(x, y, wf, rh)); x += wf; });
+      y += rh;
+    });
+    ops.length = 0;
+    redraw();
+  };
 
   const setLayout = key => {
-    panels = LAYOUTS[key].map(([x, y, w, h]) => ({
-      x: x * W + GUT / 2, y: y * H + GUT / 2,
-      w: w * W - GUT, h: h * H - GUT,
-      img: null, strokes: [], bubbles: []
-    }));
+    if (!LAYOUTS[key]) return buildCustom();
+    panels = LAYOUTS[key].map(([x, y, w, h]) => mkPanel(x, y, w, h));
     ops.length = 0;
     redraw();
   };
@@ -4416,23 +4688,27 @@ function openPanelComposer(onDone) {
     }
     ctx.fill(); ctx.stroke();
     ctx.setLineDash([]);
-    if (b.type !== 'narration') { // kuyruk
+    if (b.type !== 'narration') { // kuyruk — b.tail: down/up/left/right
       ctx.beginPath();
+      const T = { down: [0, 1], up: [0, -1], left: [-1, 0], right: [1, 0] }[b.tail || 'down'];
       if (b.type === 'thought') {
-        [[0, ry * 0.9, 7], [12, ry * 1.25, 4.5]].forEach(([dx, dy, r]) => {
-          ctx.moveTo(cx + dx + r, cy + dy); ctx.arc(cx + dx, cy + dy, r, 0, Math.PI * 2);
+        const bx = cx + T[0] * rx * 0.9, by = cy + T[1] * ry * 0.9;
+        [[bx, by, 7], [bx + T[0] * 14 - (T[0] ? 0 : 12), by + T[1] * 14 - (T[1] ? 0 : -12), 4.5]].forEach(([px, py, r]) => {
+          ctx.moveTo(px + r, py); ctx.arc(px, py, r, 0, Math.PI * 2);
         });
         ctx.fill(); ctx.stroke();
       } else {
-        ctx.moveTo(cx - rx * 0.35, cy + ry * 0.8);
-        ctx.lineTo(cx - rx * 0.1, cy + ry + 26);
-        ctx.lineTo(cx + rx * 0.05, cy + ry * 0.82);
+        const edge = T[1] ? { x: cx - rx * 0.35, y: cy + T[1] * ry * 0.8 } : { x: cx + T[0] * rx * 0.85, y: cy - ry * 0.3 };
+        const edge2 = T[1] ? { x: cx + rx * 0.05, y: cy + T[1] * ry * 0.82 } : { x: cx + T[0] * rx * 0.9, y: cy + ry * 0.15 };
+        ctx.moveTo(edge.x, edge.y);
+        ctx.lineTo(cx + T[0] * (rx + 26), cy + T[1] * (ry + 26));
+        ctx.lineTo(edge2.x, edge2.y);
         ctx.closePath(); ctx.fill(); ctx.stroke();
       }
     }
     // metin
     ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    let size = 18; ctx.font = `${size}px 'Segoe UI', sans-serif`;
+    const size = b.size || 18; ctx.font = `${size}px 'Segoe UI', sans-serif`;
     const words = b.text.split(' ');
     const lines = []; let line = '';
     words.forEach(wd => {
@@ -4455,6 +4731,18 @@ function openPanelComposer(onDone) {
         const s = Math.max(p.w / p.img.width, p.h / p.img.height);
         const iw = p.img.width * s, ih = p.img.height * s;
         ctx.drawImage(p.img, p.x + (p.w - iw) / 2, p.y + (p.h - ih) / 2, iw, ih);
+      }
+      if (p.tone && p.tone !== 'Yok') { // screentone: görselin üstüne, çizgilerin altına
+        ctx.globalAlpha = 0.45;
+        if (p.tone === 'Gradyan') {
+          const g = ctx.createLinearGradient(p.x, p.y, p.x, p.y + p.h);
+          g.addColorStop(0, '#0000'); g.addColorStop(1, '#0009');
+          ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.fillRect(p.x, p.y, p.w, p.h);
+        } else {
+          ctx.fillStyle = ctx.createPattern(toneCanvas(p.tone), 'repeat');
+          ctx.fillRect(p.x, p.y, p.w, p.h);
+        }
+        ctx.globalAlpha = 1;
       }
       p.strokes.forEach(st => {
         ctx.strokeStyle = st.color; ctx.lineWidth = st.size; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
@@ -4491,8 +4779,20 @@ function openPanelComposer(onDone) {
     } else if (tool === 'bubble' && pi >= 0) {
       const text = modal.querySelector('#pcBubbleText').value.trim();
       if (!text) return;
-      const b = { x, y, w: 190, h: Math.min(120, 56 + Math.ceil(text.length / 22) * 22), type: modal.querySelector('#pcBubbleType').value, text };
+      const size = Number(modal.querySelector('#pcBubbleSize').value) || 18;
+      const b = {
+        x, y, w: Math.max(150, Math.min(320, size * 9.5)),
+        h: Math.min(150, 40 + Math.ceil(text.length / Math.max(14, 300 / (size * 0.62))) * (size + 6)),
+        type: modal.querySelector('#pcBubbleType').value,
+        tail: modal.querySelector('#pcBubbleTail').value,
+        size, text
+      };
       panels[pi].bubbles.push(b); ops.push({ type: 'bubble', panel: pi, ref: b });
+      redraw();
+    } else if (tool === 'tone' && pi >= 0) {
+      const tone = modal.querySelector('#pcTone').value;
+      ops.push({ type: 'tone', panel: pi, prev: panels[pi].tone });
+      panels[pi].tone = tone === 'Yok' ? null : tone;
       redraw();
     } else if (tool === 'move') {
       outer: for (const p of panels) for (const b of p.bubbles)
@@ -4518,11 +4818,46 @@ function openPanelComposer(onDone) {
   canvas.addEventListener('touchmove', move, { passive: false });
   canvas.addEventListener('touchend', up);
 
-  modal.querySelector('#pcLayout').addEventListener('change', e => setLayout(e.target.value));
+  // Özel düzen: satır kurucusu
+  const rowsBox = modal.querySelector('#pcRows');
+  const renderRows = () => {
+    rowsBox.innerHTML = customRows.map((r, i) => `
+      <div class="pc-row" style="display:flex;gap:6px;align-items:center">
+        <span class="small" style="width:52px">Satır ${i + 1}</span>
+        <select data-row="${i}" data-k="split">${Object.keys(SPLITS).map(s => `<option${s === r.split ? ' selected' : ''}>${s}</option>`).join('')}</select>
+        <select data-row="${i}" data-k="h">${[[.55, 'kısa'], [1, 'normal'], [1.6, 'uzun']].map(([v, l]) => `<option value="${v}"${v === r.h ? ' selected' : ''}>${l}</option>`).join('')}</select>
+        <button class="btn ghost small" data-del="${i}" type="button" title="Satırı sil">✕</button>
+      </div>`).join('');
+  };
+  renderRows();
+  rowsBox.addEventListener('change', e => {
+    const i = Number(e.target.dataset.row);
+    if (!Number.isFinite(i)) return;
+    customRows[i][e.target.dataset.k] = e.target.dataset.k === 'h' ? Number(e.target.value) : e.target.value;
+    buildCustom();
+  });
+  rowsBox.addEventListener('click', e => {
+    const i = e.target.dataset?.del;
+    if (i === undefined) return;
+    customRows.splice(Number(i), 1);
+    renderRows(); buildCustom();
+  });
+  modal.querySelector('#pcAddRow').addEventListener('click', () => {
+    if (customRows.length >= 5) return;
+    customRows.push({ split: '2', h: 1 });
+    renderRows(); buildCustom();
+  });
+
+  modal.querySelector('#pcLayout').addEventListener('change', e => {
+    modal.querySelector('#pcCustomBar').style.display = e.target.value === 'Özel düzen' ? 'flex' : 'none';
+    setLayout(e.target.value);
+  });
+  modal.querySelector('#pcBorder').addEventListener('input', e => { BORDER = Number(e.target.value); redraw(); });
   modal.querySelectorAll('.pc-tool').forEach(b => b.addEventListener('click', () => {
     tool = b.dataset.tool;
     modal.querySelectorAll('.pc-tool').forEach(x => x.classList.toggle('on', x === b));
     modal.querySelector('#pcBubbleBar').style.display = tool === 'bubble' ? 'flex' : 'none';
+    modal.querySelector('#pcToneBar').style.display = tool === 'tone' ? 'flex' : 'none';
     modal.querySelector('#pcColor').style.visibility = ['pen','marker'].includes(tool) ? 'visible' : 'hidden';
     canvas.style.cursor = tool === 'move' ? 'grab' : 'crosshair';
   }));
@@ -4537,6 +4872,7 @@ function openPanelComposer(onDone) {
   modal.querySelector('#pcUndo').addEventListener('click', () => {
     const op = ops.pop(); if (!op) return;
     if (op.type === 'img') panels[op.panel].img = null;
+    else if (op.type === 'tone') panels[op.panel].tone = op.prev;
     else { const arr = op.type === 'stroke' ? panels[op.panel].strokes : panels[op.panel].bubbles;
       arr.splice(arr.indexOf(op.ref), 1); }
     redraw();
