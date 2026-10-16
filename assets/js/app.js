@@ -567,8 +567,11 @@ async function loadStories() {
   box.querySelectorAll('.story-circle[data-g]').forEach(el => el.addEventListener('click', () => openStoryViewer(Number(el.dataset.g))));
 }
 
-function storyImageUrl(path) {
-  return path ? sb.storage.from('post-media').getPublicUrl(path).data.publicUrl : '';
+async function storyImageUrl(path) {
+  if (!path) return '';
+  const { data } = await sb.storage.from('post-media').createSignedUrl(path, 3600);
+  const s = data?.signedUrl || '';
+  return s ? (/^https?:/.test(s) ? s : `${SUPABASE_URL}/storage/v1${s}`) : '';
 }
 
 function openStoryCreator() {
@@ -634,14 +637,14 @@ function openStoryViewer(startIdx) {
   viewer.addEventListener('click', e => { if (e.target === viewer) closeViewer(); });
 
   const closeViewer = () => { clearTimeout(storyTimer); viewer.remove(); };
-  const show = () => {
+  const show = async () => {
     clearTimeout(storyTimer);
     const group = storyGroups[gi];
     if (!group) return closeViewer();
     const story = group.stories[si];
     if (!story) { gi++; si = 0; return show(); }
     const isMine = currentUser && story.user_id === currentUser.id;
-    const imgUrl = storyImageUrl(story.image_path);
+    const imgUrl = await storyImageUrl(story.image_path);
     const ago = Math.round((Date.now() - new Date(story.created_at).getTime()) / 60000);
     const agoText = ago < 60 ? `${ago} dk` : `${Math.round(ago / 60)} sa`;
     viewer.innerHTML = `
@@ -805,6 +808,7 @@ async function loadFeed(append = false) {
   }
   feedHasMore = (posts || []).length === FEED_PAGE;
   const newPosts = await attachBookCovers(posts || []);
+  await signPostMedia(newPosts);
   cachedPosts = append ? cachedPosts.concat(newPosts) : newPosts;
 
   const ids = [...new Set(cachedPosts.map(p => p.author_id).filter(Boolean))];
@@ -1825,6 +1829,7 @@ async function renderRead(id, query = '') {
     return;
   }
   Object.assign(post, (await attachBookCovers([post]))[0] || {});
+  await signPostMedia([post]);
 
   const viewKey = `viewed:${id}`;
   if (!sessionStorage.getItem(viewKey)) {
@@ -1837,8 +1842,10 @@ async function renderRead(id, query = '') {
   }
 
   const { data: chapters, error: chapterError } = await sb.from('chapters').select('*').eq('post_id', id).order('position', { ascending: true });
+  await signPostMedia(chapters || []);
   const { data: profile } = await sb.from('profiles').select('id,username,display_name').eq('id', post.author_id).maybeSingle();
   const { data: versions } = await sb.from('post_versions').select('*').eq('post_id', id).order('version_no', { ascending: true });
+  await signPostMedia(versions || []);
   const versionList = versions || [];
   const currentVersionNo = versionList.length + 1;
 
@@ -2470,6 +2477,7 @@ async function renderProfile(id) {
 
   const { data: posts, error } = await sb.from('posts').select('*').eq('author_id', userId).order('created_at', { ascending: false });
   const profilePosts = await attachBookCovers(posts || []);
+  await signPostMedia(profilePosts);
   const { data: streakData } = await sb.rpc('production_streak', { target: userId });
   const streak = Number(streakData?.streak || 0);
 
@@ -2500,6 +2508,7 @@ async function renderProfile(id) {
       const histById = new Map((histPosts || []).map(p => [p.id, p]));
       historyPosts = histIds.map(id => histById.get(id)).filter(Boolean);
       historyPosts = await attachBookCovers(historyPosts);
+      await signPostMedia(historyPosts);
       const histAuthorIds = [...new Set(historyPosts.map(p => p.author_id).filter(Boolean))];
       const { data: histProfiles } = histAuthorIds.length
         ? await sb.from('profiles').select('id,username,display_name').in('id', histAuthorIds)
@@ -2515,6 +2524,7 @@ async function renderProfile(id) {
       const savedById = new Map((savedContentResult.data || []).map(post => [post.id, post]));
       savedPosts = savedIds.map(postId => savedById.get(postId)).filter(Boolean);
       savedPosts = await attachBookCovers(savedPosts);
+      await signPostMedia(savedPosts);
       const savedAuthorIds = [...new Set(savedPosts.map(post => post.author_id).filter(Boolean))];
       const savedProfilesResult = savedAuthorIds.length
         ? await sb.from('profiles').select('id,username,display_name').in('id', savedAuthorIds)
@@ -3764,6 +3774,7 @@ async function renderChat(conversationId, query = '') {
     const result = await sb.from('posts').select('*').eq('id', sharePostId).maybeSingle();
     sharedPost = result.data;
     sharedPostError = result.error;
+    if (sharedPost) await signPostMedia([sharedPost]);
   }
   if (location.hash !== routeAtStart) return;
 
@@ -3913,6 +3924,7 @@ async function renderChat(conversationId, query = '') {
     const postIds = [...new Set(rows.map(row => row.shared_post_id).filter(Boolean))];
     const postsResult = postIds.length ? await sb.from('posts').select('*').in('id', postIds) : { data: [] };
     const sharedPosts = await attachBookCovers(postsResult.data || []);
+    await signPostMedia(sharedPosts);
     const posts = Object.fromEntries(sharedPosts.map(p => [p.id, p]));
     const attachmentPaths = rows.filter(row => row.attachment_path).map(row => row.attachment_path);
     const signedAttachments = attachmentPaths.length ? await sb.storage.from('chat-media').createSignedUrls(attachmentPaths, 3600) : { data: [] };
@@ -4542,13 +4554,40 @@ async function compressImage(file, maxDim = 1920, quality = 0.82) {
   } catch { return file; }
 }
 
+// post-media bucket private: public URL'den path çıkarıp 1 saatlik imzalı link üretir.
+// Dış bağlantılar (YouTube/Spotify) ve zaten imzalı URL'ler dokunulmadan kalır.
+const MEDIA_PUBLIC_RE = /\/storage\/v1\/object\/public\/post-media\/(.+)$/;
+async function signPostMedia(items, fields = ['media_url']) {
+  const pathOf = {};
+  (items || []).forEach(it => {
+    if (!it) return;
+    fields.forEach(f => {
+      const m = String(it[f] || '').match(MEDIA_PUBLIC_RE);
+      if (m) pathOf[it[f]] = m[1];
+    });
+  });
+  const urls = Object.keys(pathOf);
+  if (!urls.length) return;
+  const { data } = await sb.storage.from('post-media').createSignedUrls(urls.map(u => pathOf[u]), 3600);
+  const signed = {};
+  (data || []).forEach((r, i) => {
+    if (!r?.signedUrl) return;
+    const s = r.signedUrl;
+    signed[urls[i]] = /^https?:/.test(s) ? s : `${SUPABASE_URL}/storage/v1${s.startsWith('/') ? '' : '/'}${s}`;
+  });
+  (items || []).forEach(it => {
+    if (!it) return;
+    fields.forEach(f => { if (signed[it[f]]) it[f] = signed[it[f]]; });
+  });
+}
+
 function mediaHTML(post) {
   if (!post.media_url || !/^https?:\/\//.test(post.media_url)) return '';
   const url = esc(post.media_url);
-  if (post.type === 'video') return `<video class="media" src="${url}" controls preload="metadata"></video>`;
+  if (post.type === 'video') return `<video class="media" src="${url}" controls controlsList="nodownload" preload="metadata" oncontextmenu="return false"></video>`;
   if (post.type === 'music') return musicEmbedHTML(post.media_url)
-    .replace('<audio ', `<audio data-mp-title="${esc(post.title || 'Parça')}" data-mp-href="#/read/${encodeURIComponent(post.id)}" `);
-  return `<img class="media" src="${url}" alt="${esc(post.title || '')}" loading="lazy">`;
+    .replace('<audio ', `<audio data-mp-title="${esc(post.title || 'Parça')}" data-mp-href="#/read/${encodeURIComponent(post.id)}" controlsList="nodownload" oncontextmenu="return false" `);
+  return `<img class="media" src="${url}" alt="${esc(post.title || '')}" loading="lazy" oncontextmenu="return false" draggable="false">`;
 }
 
 function musicEmbedHTML(rawUrl) {
@@ -4567,7 +4606,7 @@ function musicEmbedHTML(rawUrl) {
       return `<iframe class="music-embed" src="https://w.soundcloud.com/player/?url=${encodeURIComponent(rawUrl)}&visual=false" scrolling="no" loading="lazy"></iframe>`;
     }
   } catch {}
-  return `<audio class="media" src="${esc(rawUrl)}" controls preload="metadata"></audio>`;
+  return `<audio class="media" src="${esc(rawUrl)}" controls controlsList="nodownload" preload="metadata" oncontextmenu="return false"></audio>`;
 }
 
 async function attachBookCovers(posts) {
@@ -4767,6 +4806,7 @@ async function renderSection(key, query) {
     return;
   }
   posts = await attachBookCovers(posts);
+  await signPostMedia(posts);
   const ids = [...new Set(posts.map(p => p.author_id).filter(Boolean))];
   const pr = ids.length ? (await sb.from('profiles').select('id,username,display_name').in('id', ids)).data || [] : [];
   if (location.hash !== myHash) return;
@@ -4885,6 +4925,7 @@ async function renderDiscover(query = '') {
   if (selected === 'writing') posts = posts.filter(post => !post.type || post.type === 'writing');
   if (!posts.length) { box.innerHTML = '<div class="empty">Bu başlıkta henüz paylaşım yok.</div>'; return; }
   posts = await attachBookCovers(posts);
+  await signPostMedia(posts);
   if (quick) {
     const writingIds = posts.filter(post => !post.type || post.type === 'writing').map(post => post.id);
     if (writingIds.length) {
