@@ -97,6 +97,49 @@ function hasLegalConsent(form, prefix = 'legal') {
 function currentLegalMetadata() {
   return { terms_version: LEGAL_VERSIONS.terms, privacy_version: LEGAL_VERSIONS.privacy, community_rules_version: LEGAL_VERSIONS.community };
 }
+function userHasCurrentConsent(user) {
+  const m = user?.user_metadata || {};
+  return m.terms_version === LEGAL_VERSIONS.terms && m.privacy_version === LEGAL_VERSIONS.privacy && m.community_rules_version === LEGAL_VERSIONS.community;
+}
+
+// Giriş sonrası onay kapısı: belgeler güncel sürümde onaylanmadıysa
+// kullanıcı siteyi kullanmadan önce onaylar.
+function renderConsentGate() {
+  app.innerHTML = `
+    <section class="card form-card">
+      <div class="eyebrow">Bir adım kaldı</div>
+      <h1 style="font-size:32px">Belgeleri onayla</h1>
+      <p class="subtitle">Halka'yı kullanmaya devam etmek için aşağıdaki üç belgeyi okuyup onaylaman gerekir.</p>
+      <form id="consentGateForm">
+        <div class="field">${legalCheckboxes('gate_legal')}</div>
+        <button class="btn primary" type="submit" style="width:100%">Onayla ve devam et</button>
+      </form>
+      <button class="btn ghost" id="consentGateLogout" type="button" style="width:100%;margin-top:10px">Vazgeç — çıkış yap</button>
+      <div id="message" class="message"></div>
+    </section>`;
+  document.getElementById('consentGateForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!hasLegalConsent(e.currentTarget, 'gate_legal')) { showMessage('Üç belgeyi de okuyup onaylamalısın.', true); return; }
+    const btn = e.currentTarget.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    const meta = currentLegalMetadata();
+    const { error } = await sb.auth.updateUser({ data: meta });
+    await sb.rpc('record_legal_acceptance', {
+      accepted_terms_version: meta.terms_version,
+      accepted_privacy_version: meta.privacy_version,
+      accepted_community_version: meta.community_rules_version
+    }).catch(() => {});
+    btn.disabled = false;
+    if (error) { showMessage('Kaydedilemedi: ' + error.message, true); return; }
+    const { data: refreshed } = await sb.auth.getUser();
+    if (refreshed?.user) currentUser = refreshed.user;
+    location.hash = '#/';
+  });
+  document.getElementById('consentGateLogout').addEventListener('click', async () => {
+    await sb.auth.signOut();
+    location.hash = '#/auth?login';
+  });
+}
 
 const categories = ['Fantastik','Bilim Kurgu','Romantik','Gizem','Korku','Macera','Dram','Deneme','Günlük','Yaşam','Diğer'];
 
@@ -8032,8 +8075,13 @@ async function route() {
   setNav();
   updateHelperContext();
   if (!view) return renderHome();
+  if (currentUser && !userHasCurrentConsent(currentUser) && view !== 'auth' && view !== 'legal') {
+    location.hash = '#/auth?consent';
+    return;
+  }
   if (view === 'auth') {
     if (new URLSearchParams(query).get('mfa') === '1' || query === 'mfa') return renderMfaChallenge();
+    if (query === 'consent') return currentUser ? renderConsentGate() : renderAuth('login');
     return renderAuth(query === 'signup' ? 'signup' : 'login');
   }
   if (view === 'legal') return renderLegalPage(arg || 'terms');
