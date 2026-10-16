@@ -100,6 +100,76 @@ function currentLegalMetadata() {
 
 const categories = ['Fantastik','Bilim Kurgu','Romantik','Gizem','Korku','Macera','Dram','Deneme','Günlük','Yaşam','Diğer'];
 
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(buf) { let c = ~0; for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xFF] ^ (c >>> 8); return (~c) >>> 0; }
+
+function zipStore(files) {
+  // Minimal ZIP arşivi (stored — sıkıştırmasız). files: [{name, data(string|Uint8Array)}]
+  const enc = new TextEncoder();
+  const chunks = [], central = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const data = typeof f.data === 'string' ? enc.encode(f.data) : f.data;
+    const crc = crc32(data);
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true); lh.setUint32(14, crc, true);
+    lh.setUint32(18, data.length, true); lh.setUint32(22, data.length, true);
+    lh.setUint16(26, name.length, true);
+    chunks.push(new Uint8Array(lh.buffer), name, data);
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, data.length, true); ch.setUint32(24, data.length, true);
+    ch.setUint16(28, name.length, true); ch.setUint32(42, offset, true);
+    central.push(new Uint8Array(ch.buffer), name);
+    offset += 30 + name.length + data.length;
+  }
+  const cdSize = central.reduce((s, b) => s + b.length, 0);
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true); eocd.setUint16(8, files.length, true); eocd.setUint16(10, files.length, true);
+  eocd.setUint32(12, cdSize, true); eocd.setUint32(16, offset, true);
+  return new Blob([...chunks, ...central, new Uint8Array(eocd.buffer)], { type: 'application/epub+zip' });
+}
+
+function bodyToXhtml(body) {
+  const x = String(body || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\(([^()\n]+)\)/g, '<em>$1</em>');
+  return x.split(/\n{2,}/).map(p => `<p>${p.replace(/\n/g, '<br/>')}</p>`).join('');
+}
+
+function epubBlob(title, author, sections) {
+  // sections: [{title, body}]
+  const escX = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const uid = 'urn:halka-' + Date.now().toString(36);
+  const files = [
+    { name: 'mimetype', data: 'application/epub+zip' },
+    { name: 'META-INF/container.xml', data: `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>` },
+    { name: 'OEBPS/style.css', data: 'body{font-family:serif;line-height:1.7;margin:5%}h1,h2{font-family:sans-serif}' },
+    { name: 'OEBPS/content.opf', data: `<?xml version="1.0" encoding="UTF-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="bid">${uid}</dc:identifier><dc:title>${escX(title)}</dc:title><dc:creator>${escX(author)}</dc:creator><dc:language>tr</dc:language><meta property="dcterms:modified">${new Date().toISOString().replace(/\.\d+Z$/, 'Z')}</meta></metadata><manifest><item id="css" href="style.css" media-type="text/css"/>${sections.map((s, i) => `<item id="ch${i}" href="ch${i}.xhtml" media-type="application/xhtml+xml"/>`).join('')}<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/></manifest><spine>${sections.map((s, i) => `<itemref idref="ch${i}"/>`).join('')}</spine></package>` },
+    { name: 'OEBPS/nav.xhtml', data: `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>${escX(title)}</title></head><body><nav epub:type="toc"><h1>${escX(title)}</h1><ol>${sections.map((s, i) => `<li><a href="ch${i}.xhtml">${escX(s.title)}</a></li>`).join('')}</ol></nav></body></html>` },
+    ...sections.map((s, i) => ({
+      name: `OEBPS/ch${i}.xhtml`,
+      data: `<?xml version="1.0" encoding="UTF-8"?><html xmlns="http://www.w3.org/1999/xhtml"><head><title>${escX(s.title)}</title><link rel="stylesheet" href="style.css"/></head><body><h2>${escX(s.title)}</h2>${bodyToXhtml(s.body)}</body></html>`
+    }))
+  ];
+  return zipStore(files);
+}
+
+function downloadEpub(title, author, sections) {
+  const blob = epubBlob(title, author, sections);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${String(title || 'eser').replace(/[^\wığüşöçıİĞÜŞÖÇ -]+/g, '').trim().slice(0, 60) || 'eser'}.epub`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
 function esc(value) {
   return String(value ?? '').replace(/[&<>"']/g, ch => ({
     '&':'&amp;', '<':'&lt;', '>':'&gt;',
@@ -1543,6 +1613,10 @@ function renderWrite() {
           <input id="allowContinuation" name="allow_continuation" type="checkbox" style="width:auto">
           <label for="allowContinuation" style="margin:0">✍️ Okurlar devam yazabilsin — önerilen bölümler senin onayınla yayınlanır</label>
         </div>
+        <div class="field" style="display:flex;align-items:center;gap:8px">
+          <input id="betaWanted" name="beta_wanted" type="checkbox" style="width:auto">
+          <label for="betaWanted" style="margin:0">🔬 Beta okuyucu istiyorum — gönüllü bir okur taslağı okuyup sana özel geri bildirim bırakır</label>
+        </div>
         <div class="field">
           <label for="tags">Hashtag’ler</label>
           <input id="tags" name="tags" maxlength="160" list="hashtagSuggestions" placeholder="fantastik, günlük, kitap">
@@ -1766,6 +1840,7 @@ function renderWrite() {
         critique_wanted: form.get('critique_wanted') === 'on',
         allow_download: form.get('allow_download') === 'on',
         allow_continuation: form.get('allow_continuation') === 'on',
+        beta_wanted: form.get('beta_wanted') === 'on',
         is_draft: isDraft,
         theme_id: new URLSearchParams(location.hash.split('?')[1] || '').get('theme') || null
       };
@@ -1970,6 +2045,17 @@ async function renderRead(id, query = '') {
   }
   const myContinuation = continuations.find(c => currentUser && c.author_id === currentUser.id);
   const pendingConts = continuations.filter(c => c.status === 'pending');
+
+  // Birlikte okuyalım kulüpleri (bölümlü eserlerde)
+  let clubs = [], clubMemberCounts = {};
+  if ((chapters || []).length) {
+    const { data: cls } = await sb.from('reading_clubs').select('*').eq('post_id', id).eq('status', 'active').order('created_at', { ascending: false }).limit(10);
+    clubs = cls || [];
+    if (clubs.length) {
+      const { data: cms } = await sb.from('reading_club_members').select('club_id').in('club_id', clubs.map(c => c.id));
+      (cms || []).forEach(m => { clubMemberCounts[m.club_id] = (clubMemberCounts[m.club_id] || 0) + 1; });
+    }
+  }
   const { data: profile } = await sb.from('profiles').select('id,username,display_name').eq('id', post.author_id).maybeSingle();
   const { data: versions } = await sb.from('post_versions').select('*').eq('post_id', id).order('version_no', { ascending: true });
   await signPostMedia(versions || []);
@@ -2002,6 +2088,19 @@ async function renderRead(id, query = '') {
   const commentProfileMap = Object.fromEntries(commentProfiles.map(p => [p.id, p]));
 
   const isOwner = !!currentUser && currentUser.id === post.author_id;
+
+  // Beta okuyucular: sahip hepsini, okur yalnız kendi eşleşmesini görür (RLS)
+  let betaReports = [], betaReaderProfiles = {};
+  if (currentUser) {
+    const { data: bm } = await sb.from('beta_matches').select('*').eq('post_id', id).order('created_at', { ascending: false });
+    betaReports = bm || [];
+    const readerIds = [...new Set(betaReports.map(b => b.reader_id))];
+    if (isOwner && readerIds.length) {
+      const { data: rps } = await sb.from('profiles').select('id,username,display_name').in('id', readerIds);
+      betaReaderProfiles = Object.fromEntries((rps || []).map(p => [p.id, p]));
+    }
+  }
+  const myBetaMatch = betaReports.find(b => b.reader_id === currentUser?.id);
   const canReportPost = !!currentUser && !isOwner;
 
   const commentsByParent = new Map();
@@ -2196,6 +2295,8 @@ async function renderRead(id, query = '') {
       <div class="meta">
         <span>${!post.type || post.type === 'writing' ? 'Yazar' : 'Paylaşan'}: ${post.pen_name ? `<span title="Kalem adı">✒️ ${esc(post.pen_name)}</span>` : `<a href="#/user/${encodeURIComponent(post.author_id)}">${esc(displayName(profile))}</a>`}</span>
         ${post.critique_wanted ? '<span class="critique-badge">🎯 Eleştiri bekliyor</span>' : ''}
+        ${post.beta_wanted ? '<span class="critique-badge">🔬 Beta okur arıyor</span>' : ''}
+        ${myBetaMatch && !isOwner ? '<span class="chip small">🔬 Beta okurusun</span>' : ''}
         <span>· ${esc(formatDate(post.created_at))}</span>
         <span>· ${Number(post.view_count || 0)} görüntülenme</span>
       </div>
@@ -2234,14 +2335,28 @@ async function renderRead(id, query = '') {
       </button>
         ${currentUser ? `<a class="btn ghost small" href="#/chat?share=${encodeURIComponent(post.id)}">Sohbette paylaş</a>` : ''}
         ${currentUser ? '<button class="btn ghost small" id="collectionBtn" type="button">📚 Koleksiyona ekle</button>' : ''}
+        ${(!post.type || post.type === 'writing') && (chapters || []).some(c => c.body?.trim()) && 'speechSynthesis' in window ? '<button class="btn ghost small" id="ttsBtn" type="button" title="Eseri sesli oku">🔊 Dinle</button>' : ''}
+        ${(!post.type || post.type === 'writing') && (chapters || []).some(c => c.body?.trim()) && (isOwner || post.allow_download) ? '<button class="btn ghost small" id="epubBtn" type="button" title="Kitap olarak indir">📤 EPUB indir</button>' : ''}
         ${isOwner && post.is_draft ? '<button class="btn primary small" id="publishDraftBtn" type="button">📢 Taslağı yayınla</button>' : ''}
         ${isOwner ? '<button class="btn ghost small" id="newVersionBtn" type="button">📜 Yeni versiyon</button>' : ''}
         ${isOwner && (post.media_url || post.kind === 'manga') ? `<button class="btn ghost small" id="downloadToggleBtn" type="button" title="Eserin indirilip indirilemeyeceğini seç">⬇️ İndirme: ${post.allow_download ? 'açık' : 'kapalı'}</button>` : ''}
+        ${isOwner ? '<button class="btn ghost small" id="readStatsBtn" type="button" title="Okurlarının anonim okuma özetleri">📊 Okuma istatistikleri</button>' : ''}
         ${isOwner && (!post.type || post.type === 'writing') ? `<button class="btn ghost small" id="contToggleBtn" type="button" title="Okurların devam önermesine izin ver/kes">✍️ Devam: ${post.allow_continuation ? 'açık' : 'kapalı'}</button>` : ''}
+        ${isOwner ? `<button class="btn ghost small" id="betaToggleBtn" type="button" title="Gönüllü beta okuyucu eşleşmesi aç/kapat">🔬 Beta: ${post.beta_wanted ? 'açık' : 'kapalı'}</button>` : ''}
         ${isOwner && post.kind === 'manga' && (chapters || []).some(c => c.media_url) ? '<button class="btn ghost small" id="mangaCoverBtn" type="button" title="Bir sayfadan kapak üret">🖼️ Kapak üret</button>' : ''}
         ${canReportPost ? '<button class="btn ghost small" id="reportPostToggle" type="button">Eseri bildir</button>' : ''}
         ${isCurrentUserAdmin ? '<button class="btn ghost small" id="adminFlagPost" type="button">⚑ İncelemeye al</button>' : ''}
     </div>
+    ${isOwner ? '<div id="readStatsPanel" hidden></div>' : ''}
+    ${isOwner && betaReports.length ? `<section class="card">
+      <div class="section-head"><h3 style="margin:0">🔬 Beta raporları (${betaReports.length})</h3></div>
+      ${betaReports.map(b => `<div class="member-row" style="align-items:flex-start">
+        <a class="member-id" href="#/user/${encodeURIComponent(b.reader_id)}"><span class="avatar">${initials(displayName(betaReaderProfiles[b.reader_id]))}</span><span>${esc(displayName(betaReaderProfiles[b.reader_id]))}<br><span class="small">${b.done_at ? `✅ ${esc(formatDate(b.done_at))}` : '⏳ okuyor'}</span></span></a>
+        ${b.feedback ? `<div class="interview-body" style="flex:1;padding:6px 10px;border:1px solid var(--line);border-radius:8px">${esc(b.feedback)}</div>` : ''}
+        <button class="btn ghost small beta-kick" data-match="${esc(b.id)}" type="button" title="Okur erişimini kaldır">🗑</button>
+      </div>`).join('')}
+      <div class="small">Beta okurlar ${post.is_draft ? 'taslağını görebilir' : 'eserini okuyabilir'}; geri bildirimleri yalnızca sana görünür.</div>
+    </section>` : ''}
     ${canReportPost ? reportFormHTML('post', post.id, 'report-form', 'postReportForm') : ''}
     ${chapterError ? `<div class="empty">Bölümler yüklenemedi.<br><span class="small">${esc(chapterError.message)}</span></div>` : ''}
     ${post.kind === 'manga' && (chapters || []).filter(c => c.media_url).length > 1 ? `
@@ -2317,6 +2432,13 @@ async function renderRead(id, query = '') {
     </section>` : ''}
     ${currentUser && (chapters || []).length > 0 ? '<div class="continue-reading" id="continueReadingBar" hidden><span id="continueReadingText"></span><button class="btn primary small" id="continueReadingBtn" type="button">Kaldığın yerden devam et</button></div>' : ''}
     ${(!chapterError && !post.media_url && !post.cover_path && !(chapters || []).length) ? '<div class="empty">Bu esere henüz bölüm eklenmemiş.</div>' : ''}
+
+    ${(chapters || []).length ? `<section class="card">
+      <div class="section-head"><h3 style="margin:0">📖 Birlikte okuyalım</h3>${currentUser ? '<button class="btn ghost small" id="clubCreateBtn" type="button">+ Kulüp kur</button>' : ''}</div>
+      ${clubs.length ? clubs.map(c => `<div class="member-row">
+        <a class="member-id" href="#/kulup/${encodeURIComponent(c.id)}">📚 <span>${esc(c.name)}<br><span class="small">${clubMemberCounts[c.id] || 0} üye · ${(chapters || [])[c.current_chapter] ? `Şu an: ${esc((chapters || [])[c.current_chapter].title || `Bölüm ${c.current_chapter + 1}`)}` : 'Başlamadı'}</span></span></a>
+      </div>`).join('') : '<div class="empty small">Bu eser için okuma kulübü yok — kur, birlikte bölüm bölüm okuyup tartışın.</div>'}
+    </section>` : ''}
 
     <section class="comments-section">
       <h3 style="font-family:'Fredoka',sans-serif;margin-bottom:14px">💬 Yorumlar (${comments.length})</h3>
@@ -2438,6 +2560,17 @@ async function renderRead(id, query = '') {
     appendComment(data);
   });
   bindCommentInteractions(document.getElementById('commentsList'));
+  document.getElementById('clubCreateBtn')?.addEventListener('click', async () => {
+    if (!currentUser) return;
+    const name = prompt('Kulüp adı (örn. "Mart ayı birlikte okuması"):', `${post.title || 'Eser'} kulübü`);
+    if (name === null) return;
+    if (!name.trim()) return alert('Kulüp adı gerekli.');
+    const { data, error } = await sb.from('reading_clubs').insert({
+      post_id: id, name: name.trim(), created_by: currentUser.id
+    }).select('id').single();
+    if (error) return alert('Kulüp kurulamadı: ' + error.message);
+    location.hash = `#/kulup/${encodeURIComponent(data.id)}`;
+  });
   document.querySelectorAll('.chapter-comments-toggle').forEach(btn => {
     btn.addEventListener('click', () => {
       const panel = btn.parentElement.querySelector('.chapter-comments-panel');
@@ -2546,6 +2679,73 @@ async function renderRead(id, query = '') {
     showMessage(next ? 'İndirme açıldı — imzalı link üzerinden indirilebilir.' : 'İndirme kapatıldı.');
     renderRead(post.id);
   });
+  const ttsBtn = document.getElementById('ttsBtn');
+  if (ttsBtn) ttsBtn.addEventListener('click', () => {
+    if (speechSynthesis.speaking || speechSynthesis.pending) {
+      speechSynthesis.cancel();
+      ttsBtn.textContent = '🔊 Dinle';
+      return;
+    }
+    const parts = [];
+    if (post.title) parts.push(post.title + '.');
+    if (post.description) parts.push(post.description);
+    (chapters || []).forEach(c => {
+      if (c.title) parts.push(c.title + '.');
+      if (c.body) parts.push(c.body);
+    });
+    if (!parts.length) return;
+    const chunks = [];
+    parts.forEach(t => {
+      t.split(/\n{2,}|(?<=[.!?])\s+/).forEach(p => {
+        const s = p.trim();
+        if (s) chunks.push(s.length > 180 ? s.slice(0, 180) : s);
+      });
+    });
+    const trVoice = speechSynthesis.getVoices().find(v => v.lang?.startsWith('tr')) || null;
+    let i = 0;
+    ttsBtn.textContent = '⏸ Durdur';
+    const speakNext = () => {
+      if (i >= chunks.length) { ttsBtn.textContent = '🔊 Dinle'; return; }
+      const u = new SpeechSynthesisUtterance(chunks[i++]);
+      if (trVoice) u.voice = trVoice;
+      u.lang = trVoice?.lang || 'tr-TR';
+      u.rate = 1;
+      u.onend = speakNext;
+      speechSynthesis.speak(u);
+    };
+    speakNext();
+  });
+  document.getElementById('readStatsBtn')?.addEventListener('click', async () => {
+    const panel = document.getElementById('readStatsPanel');
+    if (!panel) return;
+    if (!panel.hidden) { panel.hidden = true; return; }
+    panel.hidden = false;
+    panel.innerHTML = '<div class="small">Yükleniyor…</div>';
+    const { data: st, error } = await sb.rpc('author_reading_stats', { p_post: post.id });
+    if (error) { panel.innerHTML = `<div class="small">İstatistik alınamadı: ${esc(error.message)}</div>`; return; }
+    const days = st.daily || [];
+    const maxD = Math.max(1, ...days.map(d => d.n));
+    const reach = st.chapter_reach || [];
+    const maxR = Math.max(1, ...reach.map(r => r.n));
+    const chTotal = st.chapter_total || (chapters || []).length;
+    panel.innerHTML = `
+      <div class="version-bar" style="margin-top:12px;display:block">
+        <p class="small"><strong>👁 ${post.view_count || 0}</strong> toplam görüntülenme · <strong>${st.readers || 0}</strong> kayıtlı okur (giriş yapanlar)</p>
+        ${days.length ? `<div class="small" style="margin:6px 0 4px">Son 30 gün görüntülenme:</div>
+        <div style="display:flex;align-items:flex-end;gap:3px;height:56px">${days.map(d => `<div title="${esc(d.day)}: ${d.n}" style="flex:1;background:var(--gold,#d9b978);border-radius:3px 3px 0 0;height:${Math.max(6, Math.round(d.n / maxD * 52))}px;min-width:4px"></div>`).join('')}</div>` : '<div class="empty small">Son 30 günde kayıtlı görüntülenme yok.</div>'}
+        ${chTotal > 1 ? `<div class="small" style="margin:10px 0 4px">Bölüm ulaşımı — okurlar en çok nereye kadar geldi:</div>
+        ${Array.from({ length: chTotal }, (_, i) => {
+          const n = (reach.find(r => r.chapter === i) || {}).n || 0;
+          return `<div style="display:flex;align-items:center;gap:6px;margin:3px 0"><span class="small" style="width:78px">${esc((chapters || [])[i]?.title || (i + 1) + '. bölüm')}</span><div style="flex:1;background:var(--line);border-radius:4px;height:10px"><div style="width:${Math.round(n / maxR * 100)}%;background:var(--gold,#d9b978);height:100%;border-radius:4px"></div></div><span class="small" style="width:28px">${n}</span></div>`;
+        }).join('')}
+        <p class="small" style="margin-top:6px;opacity:.7">Yalnızca giriş yapmış okurların ilerlemesi sayılır — anonimdir, kişi gösterilmez.</p>` : ''}
+      </div>`;
+  });
+  document.getElementById('epubBtn')?.addEventListener('click', () => {
+    const secs = (chapters || []).filter(c => c.body?.trim()).map(c => ({ title: c.title || 'Bölüm', body: c.body }));
+    if (!secs.length) return alert('İndirilecek metin bölümü yok.');
+    downloadEpub(post.title, post.pen_name || displayName(profile), secs);
+  });
   document.getElementById('publishDraftBtn')?.addEventListener('click', async () => {
     const { error } = await sb.from('posts').update({ is_draft: false }).eq('id', post.id).eq('author_id', currentUser.id);
     if (error) return showMessage('Yayınlanamadı: ' + error.message, true);
@@ -2558,6 +2758,18 @@ async function renderRead(id, query = '') {
     if (error) return showMessage('Ayar güncellenemedi: ' + error.message, true);
     renderRead(post.id);
   });
+  document.getElementById('betaToggleBtn')?.addEventListener('click', async () => {
+    const next = !post.beta_wanted;
+    const { error } = await sb.from('posts').update({ beta_wanted: next }).eq('id', post.id).eq('author_id', currentUser.id);
+    if (error) return alert('Ayar güncellenemedi: ' + error.message);
+    renderRead(post.id);
+  });
+  app.querySelectorAll('.beta-kick').forEach(btn => btn.addEventListener('click', async () => {
+    if (!confirm('Bu okurun beta erişimi kaldırılsın mı?')) return;
+    const { error } = await sb.from('beta_matches').delete().eq('id', btn.dataset.match);
+    if (error) return alert('Kaldırılamadı: ' + error.message);
+    renderRead(post.id);
+  }));
   document.getElementById('contForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const f = e.target;
@@ -6606,6 +6818,17 @@ async function renderCommunity(id, query = '') {
     const { data: mm } = await sb.from('posts').select('id,title').eq('author_id', currentUser.id).eq('type', 'music').order('created_at', { ascending: false });
     myMusic = mm || [];
   }
+
+  // Röportaj köşesi (herkese açık vitrin)
+  const { data: interviews } = await sb.from('community_interviews').select('*')
+    .eq('community_id', id).order('pinned', { ascending: false }).order('created_at', { ascending: false }).limit(30);
+  const interviewRows = interviews || [];
+  const interviewUserIds = [...new Set(interviewRows.flatMap(i => [i.interviewer_id, i.guest_id]))];
+  let interviewProfiles = {};
+  if (interviewUserIds.length) {
+    const { data: ips } = await sb.from('profiles').select('id,username,display_name').in('id', interviewUserIds);
+    interviewProfiles = Object.fromEntries((ips || []).map(p => [p.id, p]));
+  }
   const jamListHTML = () => jamItems.length ? jamItems.map(it => {
     const p = jamPostMap[it.post_id];
     const canDel = it.added_by === currentUser?.id || isAdmin;
@@ -6720,6 +6943,28 @@ async function renderCommunity(id, query = '') {
       </div>
       <div class="small" style="margin-top:6px">Kuyruk tüm üyelere ortaktır — eklenen parçalar herkese anında görünür.</div>
     </section>` : ''}
+    <section class="card">
+      <div class="section-head"><h2>🎙️ Röportaj köşesi</h2>${isAdmin ? '<button class="btn ghost small" id="ivAddToggle" type="button">+ Röportaj</button>' : ''}</div>
+      ${isAdmin ? `<form id="ivForm" hidden style="display:grid;gap:8px;margin-bottom:12px">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <input id="ivTitle" maxlength="160" placeholder="Röportaj başlığı" required style="flex:2;min-width:180px">
+          <select id="ivGuest" style="flex:1;min-width:150px">${memberRows.map(m => `<option value="${esc(m.user_id)}">${esc(displayName(profileMap[m.user_id]))}</option>`).join('')}</select>
+        </div>
+        <textarea id="ivBody" maxlength="20000" rows="6" placeholder="Soru-cevap metni…" required></textarea>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button class="btn primary small" type="submit">Yayınla</button>
+          <div id="ivMessage" class="message" aria-live="polite" style="margin:0"></div>
+        </div>
+      </form>` : ''}
+      ${interviewRows.length ? interviewRows.map(iv => `
+        <details class="interview-item">
+          <summary class="interview-head">${iv.pinned ? '📌 ' : ''}${esc(iv.title)}<span class="small"> · ${esc(displayName(interviewProfiles[iv.guest_id], 'Üye'))} ile · ${esc(displayName(interviewProfiles[iv.interviewer_id], 'Üye'))}</span>
+            ${isAdmin ? `<button class="btn ghost small iv-pin" data-iv="${esc(iv.id)}" data-pin="${iv.pinned ? '' : '1'}" type="button">${iv.pinned ? 'Sabitlemeyi kaldır' : '📌 Sabitle'}</button>
+            <button class="btn ghost small iv-del" data-iv="${esc(iv.id)}" type="button">🗑</button>` : ''}
+          </summary>
+          <div class="interview-body">${esc(iv.body).replace(/\n/g, '<br>')}</div>
+        </details>`).join('') : '<div class="empty small">Henüz röportaj yok — yöneticiler üyelerle mini söyleşiler yayınlayabilir.</div>'}
+    </section>
     <section class="card">
       <div class="section-head"><h2>Üyeler</h2></div>
       <div class="member-list">${memberRows.map(m => {
@@ -6923,6 +7168,38 @@ async function renderCommunity(id, query = '') {
     miniPlayerState.jamQueue = tracks;
     openMiniPlayer(tracks[0].src, tracks[0].title, tracks[0].href);
   });
+  // Röportaj köşesi
+  document.getElementById('ivAddToggle')?.addEventListener('click', () => {
+    const form = document.getElementById('ivForm');
+    if (form) { form.hidden = !form.hidden; if (!form.hidden) document.getElementById('ivTitle')?.focus(); }
+  });
+  document.getElementById('ivForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const msg = document.getElementById('ivMessage');
+    const payload = {
+      community_id: id,
+      interviewer_id: currentUser.id,
+      guest_id: document.getElementById('ivGuest')?.value,
+      title: document.getElementById('ivTitle').value.trim(),
+      body: document.getElementById('ivBody').value.trim()
+    };
+    const { error } = await sb.from('community_interviews').insert(payload);
+    if (error) { if (msg) { msg.textContent = 'Yayınlanamadı: ' + error.message; msg.className = 'message error'; } return; }
+    renderCommunity(id, query);
+  });
+  app.querySelectorAll('.iv-pin').forEach(btn => btn.addEventListener('click', async () => {
+    const { error } = await sb.from('community_interviews').update({ pinned: btn.dataset.pin === '1' }).eq('id', btn.dataset.iv);
+    if (error) return alert('Güncellenemedi: ' + error.message);
+    renderCommunity(id, query);
+  }));
+  app.querySelectorAll('.iv-del').forEach(btn => btn.addEventListener('click', async e => {
+    e.preventDefault();
+    if (!confirm('Bu röportaj silinsin mi?')) return;
+    const { error } = await sb.from('community_interviews').delete().eq('id', btn.dataset.iv);
+    if (error) return alert('Silinemedi: ' + error.message);
+    renderCommunity(id, query);
+  }));
+
   document.getElementById('communityEditForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -7053,6 +7330,19 @@ async function renderCritique() {
   const openCountRes = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('critique_wanted', true).neq('author_id', currentUser.id);
   const typeIcon = { writing: '✍️', drawing: '🎨', photo: '📷', video: '🎬', music: '🎵' };
 
+  // Beta okur tarafı
+  const { data: betaMatches } = await sb.from('beta_matches').select('*').eq('reader_id', currentUser.id).order('created_at', { ascending: false });
+  const bList = betaMatches || [];
+  const bPending = bList.filter(m => !m.done_at);
+  const bDone = bList.filter(m => m.done_at);
+  const betaPostIds = bList.map(m => m.post_id);
+  const { data: bps } = betaPostIds.length ? await sb.from('posts').select('id,title,type,kind,author_id,description,is_draft').in('id', betaPostIds) : { data: [] };
+  const bpMap = Object.fromEntries((bps || []).map(p => [p.id, p]));
+  const bAuthorIds = [...new Set((bps || []).map(p => p.author_id))];
+  const { data: baps } = bAuthorIds.length ? await sb.from('profiles').select('id,username,display_name').in('id', bAuthorIds) : { data: [] };
+  const baMap = Object.fromEntries((baps || []).map(a => [a.id, a]));
+  const { data: betaCount } = await sb.rpc('beta_queue_count');
+
   app.innerHTML = `
     <section class="hero">
       <div class="eyebrow">🎯 Kritik Eşleşmesi</div>
@@ -7082,7 +7372,26 @@ async function renderCritique() {
       ${done.slice(0, 10).map(m => {
         const p = pMap[m.post_id];
         return p ? `<div class="collection-item-row"><a href="#/read/${encodeURIComponent(p.id)}">${typeIcon[p.type || 'writing'] || '✍️'} ${esc(p.title || 'Başlıksız eser')}</a><span class="small">✅ ${esc(formatDate(m.done_at))}</span></div>` : '';
-      }).join('')}</section>` : ''}`;
+      }).join('')}</section>` : ''}
+    <section class="card">
+      <div class="section-head"><h2>🔬 Beta okuyucu ol</h2><button class="btn primary small" id="betaDrawBtn" type="button" ${bPending.length >= 3 ? 'disabled' : ''}>🎲 Beta eşleşmesi çek</button></div>
+      <p class="small">"Beta okur istiyorum" diyen yazarlardan rastgele bir taslağa erişirsin — okur, yazara özel geri bildirim bırakırsın. ${betaCount ? `Şu an ${betaCount} eser okur bekliyor.` : ''}</p>
+      ${bPending.length ? bPending.map(m => {
+        const p = bpMap[m.post_id];
+        if (!p) return '';
+        return `<div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
+          <a class="post-card-title" href="#/read/${encodeURIComponent(p.id)}">${typeIcon[p.type || 'writing'] || '✍️'} ${esc(p.title || 'Başlıksız eser')}${p.is_draft ? ' <span class="chip small">taslak</span>' : ''}</a>
+          <div class="small">${esc(quickTypeLabel(p))} · <a href="#/user/${encodeURIComponent(p.author_id)}">${esc(displayName(baMap[p.author_id], 'Halka üyesi'))}</a></div>
+          <div class="small" style="margin-top:6px">Oku, sonra geri bildirimini yaz:</div>
+          <textarea class="beta-feedback" data-match="${esc(m.id)}" maxlength="5000" rows="3" placeholder="Neler işe yaradı? Nerede koptun? Ne geliştirilmeli?">${esc(m.feedback || '')}</textarea>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn primary small beta-done" data-match="${esc(m.id)}" type="button">✓ Geri bildirimi gönder</button>
+            <button class="btn ghost small beta-save" data-match="${esc(m.id)}" type="button">Taslak kaydet</button>
+          </div>
+        </div>`;
+      }).join('') : '<div class="empty small">Açık beta görevin yok.</div>'}
+      ${bDone.length ? `<div class="small" style="margin-top:8px">Tamamlanan beta okumaları: ${bDone.length}</div>` : ''}
+    </section>`;
 
   document.getElementById('critDrawBtn')?.addEventListener('click', async () => {
     const { data: candidates } = await sb.from('posts').select('id').eq('critique_wanted', true).neq('author_id', currentUser.id).limit(100);
@@ -7096,6 +7405,28 @@ async function renderCritique() {
   });
   app.querySelectorAll('.crit-done').forEach(btn => btn.addEventListener('click', async () => {
     await sb.from('critique_matches').update({ done_at: new Date().toISOString() }).eq('id', btn.dataset.match).eq('critic_id', currentUser.id);
+    renderCritique();
+  }));
+
+  // Beta okur bağlamaları
+  document.getElementById('betaDrawBtn')?.addEventListener('click', async () => {
+    const { data: postId, error: dErr } = await sb.rpc('draw_beta_match');
+    if (dErr) return alert('Eşleşme yapılamadı: ' + dErr.message);
+    if (!postId) return alert('Şu an okur bekleyen yeni eser yok — daha sonra tekrar dene.');
+    renderCritique();
+  });
+  app.querySelectorAll('.beta-save').forEach(btn => btn.addEventListener('click', async () => {
+    const ta = app.querySelector(`.beta-feedback[data-match="${btn.dataset.match}"]`);
+    const { error: e2 } = await sb.from('beta_matches').update({ feedback: ta?.value.trim() || null }).eq('id', btn.dataset.match).eq('reader_id', currentUser.id);
+    if (e2) return alert('Kaydedilemedi: ' + e2.message);
+    btn.textContent = '✓ Kaydedildi';
+  }));
+  app.querySelectorAll('.beta-done').forEach(btn => btn.addEventListener('click', async () => {
+    const ta = app.querySelector(`.beta-feedback[data-match="${btn.dataset.match}"]`);
+    const feedback = ta?.value.trim() || '';
+    if (!feedback) return alert('Önce geri bildirimini yaz — yazar bunu okuyacak.');
+    const { error: e2 } = await sb.from('beta_matches').update({ feedback, done_at: new Date().toISOString() }).eq('id', btn.dataset.match).eq('reader_id', currentUser.id);
+    if (e2) return alert('Gönderilemedi: ' + e2.message);
     renderCritique();
   }));
 }
@@ -7351,7 +7682,10 @@ async function renderSeries(id) {
       <h1>${esc(series.title)}</h1>
       <p class="subtitle">${esc(series.description || '')}</p>
       <p class="meta">${rows.length} eser · ${esc(formatDate(series.created_at))}</p>
-      ${isOwner ? `<div class="post-actions"><button class="btn danger small" id="seriesDeleteBtn" type="button">Seriyi sil</button></div>` : ''}
+      <div class="post-actions" style="justify-content:center">
+        <button class="btn ghost small" id="seriesEpubBtn" type="button" title="Seriyi kitap dosyası olarak indir">📤 Seriyi EPUB indir</button>
+        ${isOwner ? '<button class="btn danger small" id="seriesDeleteBtn" type="button">Seriyi sil</button>' : ''}
+      </div>
     </section>
     <section class="card">
       <div class="post-list">
@@ -7397,11 +7731,125 @@ async function renderSeries(id) {
     ]);
     renderSeries(id);
   }));
+  document.getElementById('seriesEpubBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('seriesEpubBtn');
+    btn.disabled = true; btn.textContent = 'Hazırlanıyor…';
+    try {
+      const allowed = rows.map(r => postMap[r.post_id]).filter(p => p && (p.allow_download || p.author_id === currentUser?.id));
+      if (!allowed.length) { alert('Bu seride indirilebilir eser yok — yazarlar indirmeye izin vermemiş.'); return; }
+      const secs = [];
+      for (const p of allowed) {
+        const { data: chs } = await sb.from('chapters').select('title,body,position').eq('post_id', p.id).order('position');
+        (chs || []).filter(c => c.body?.trim()).forEach(c => secs.push({ title: `${p.title || 'Eser'} — ${c.title || 'Bölüm'}`, body: c.body }));
+      }
+      if (!secs.length) { alert('Metin bölümü bulunamadı.'); return; }
+      downloadEpub(series.title, displayName(author, 'Halka'), secs);
+    } finally {
+      btn.disabled = false; btn.textContent = '📤 Seriyi EPUB indir';
+    }
+  });
   document.getElementById('seriesDeleteBtn')?.addEventListener('click', async () => {
     if (!confirm('Seri silinsin mi? (Eserler silinmez, yalnızca grup dağılır)')) return;
     const { error: e2 } = await sb.from('post_series').delete().eq('id', id).eq('author_id', currentUser.id);
     if (e2) return alert('Silinemedi: ' + e2.message);
     location.hash = '#/';
+  });
+}
+
+// 📖 Birlikte okuyalım kulübü
+async function renderClub(id) {
+  app.innerHTML = loadingBlock('Kulüp açılıyor…');
+  const { data: club, error } = await sb.from('reading_clubs').select('*').eq('id', id).maybeSingle();
+  if (error || !club) {
+    app.innerHTML = `<div class="empty">Kulüp bulunamadı.${error ? `<br><span class="small">${esc(error.message)}</span>` : ''}</div>`;
+    return;
+  }
+  const { data: post } = await sb.from('posts').select('id,title,kind,author_id,description').eq('id', club.post_id).maybeSingle();
+  if (!post) { app.innerHTML = '<div class="empty">Kulübün eseri artık yok.</div>'; return; }
+  const { data: chapters } = await sb.from('chapters').select('id,title,position').eq('post_id', post.id).order('position');
+  const chList = chapters || [];
+  const { data: members } = await sb.from('reading_club_members').select('user_id,joined_at').eq('club_id', id).order('joined_at');
+  const memberIds = (members || []).map(m => m.user_id);
+  const allIds = [...new Set([club.created_by, post.author_id, ...memberIds])];
+  const { data: profs } = allIds.length ? await sb.from('profiles').select('id,username,display_name').in('id', allIds) : { data: [] };
+  const profMap = Object.fromEntries((profs || []).map(p => [p.id, p]));
+
+  const { data: chComments } = await sb.from('comments').select('chapter_id').eq('post_id', post.id).not('chapter_id', 'is', null);
+  const commentCounts = {};
+  (chComments || []).forEach(c => { commentCounts[c.chapter_id] = (commentCounts[c.chapter_id] || 0) + 1; });
+
+  const isCreator = currentUser?.id === club.created_by;
+  const isMember = !!currentUser && memberIds.includes(currentUser.id);
+  const cur = chList[club.current_chapter];
+
+  app.innerHTML = `
+    <p><a href="#/read/${encodeURIComponent(post.id)}">← ${esc(post.title || 'Eser')}</a></p>
+    <section class="hero">
+      <div class="eyebrow">📖 Birlikte okuyalım ${club.status === 'finished' ? '· tamamlandı' : ''}</div>
+      <h1>${esc(club.name)}</h1>
+      <p class="subtitle"><a href="#/read/${encodeURIComponent(post.id)}">${esc(post.title || 'Eser')}</a> — bölüm bölüm okuyup tartışan bir kulüp.</p>
+      <p class="meta">${memberIds.length} üye · Kuran: ${esc(displayName(profMap[club.created_by]))} · ${esc(formatDate(club.created_at))}</p>
+      ${cur ? `<div class="channel-pinned" style="text-align:left">📍 Şu an okunan: <strong>${esc(cur.title || `Bölüm ${club.current_chapter + 1}`)}</strong> — oku, sonra bölüm yorumlarında buluşalım.</div>` : ''}
+      <div class="post-actions" style="justify-content:center">
+        ${currentUser ? (isMember
+          ? `<button class="btn ghost" id="clubLeaveBtn" type="button">Kulüpten ayrıl</button>`
+          : `<button class="btn primary" id="clubJoinBtn" type="button">Katıl</button>`) : '<a class="btn primary" href="#/auth?login">Katılmak için giriş yap</a>'}
+        ${isCreator ? `
+          ${club.status === 'active' ? `<button class="btn ghost small" id="clubPrevBtn" type="button" ${club.current_chapter <= 0 ? 'disabled' : ''}>‹ Önceki bölüm</button>
+          <button class="btn primary small" id="clubNextBtn" type="button" ${club.current_chapter >= chList.length - 1 ? 'disabled' : ''}>Sonraki bölüm ›</button>
+          <button class="btn ghost small" id="clubFinishBtn" type="button">🏁 Kulübü bitir</button>` : `<button class="btn ghost small" id="clubReopenBtn" type="button">↩ Yeniden aç</button>`}
+          <button class="btn danger small" id="clubDeleteBtn" type="button">Kulübü sil</button>` : ''}
+      </div>
+    </section>
+    <section class="card">
+      <div class="section-head"><h2>Bölümler</h2></div>
+      ${chList.map((c, i) => {
+        const isCur = i === club.current_chapter && club.status === 'active';
+        const done = i < club.current_chapter || club.status === 'finished';
+        return `<div class="member-row" ${isCur ? 'style="background:#d9b97812;border-radius:10px"' : ''}>
+          <a class="member-id" href="#/read/${encodeURIComponent(post.id)}"><span style="width:26px;text-align:center">${isCur ? '📍' : done ? '✅' : '⏳'}</span><span>${esc(c.title || `Bölüm ${i + 1}`)}<br><span class="small">${commentCounts[c.id] || 0} yorum</span></span></a>
+        </div>`;
+      }).join('') || '<div class="empty">Eserde henüz bölüm yok.</div>'}
+      <div class="small" style="margin-top:8px">Tartışma eser sayfasındaki bölüm yorumlarında yürüyor — bölüme dokun, orada yorumla.</div>
+    </section>
+    <section class="card">
+      <div class="section-head"><h2>Üyeler (${memberIds.length})</h2></div>
+      <div class="member-list">${(members || []).map(m => `<div class="member-row">
+        <a class="member-id" href="#/user/${encodeURIComponent(m.user_id)}"><span class="avatar">${initials(displayName(profMap[m.user_id]))}</span><span>${esc(displayName(profMap[m.user_id]))}${m.user_id === club.created_by ? ' <span class="small">· kurucu</span>' : ''}</span></a>
+      </div>`).join('') || '<div class="empty">Henüz üye yok.</div>'}</div>
+    </section>`;
+
+  document.getElementById('clubJoinBtn')?.addEventListener('click', async () => {
+    const { error: e2 } = await sb.from('reading_club_members').insert({ club_id: id, user_id: currentUser.id });
+    if (e2) return alert('Katılınamadı: ' + e2.message);
+    renderClub(id);
+  });
+  document.getElementById('clubLeaveBtn')?.addEventListener('click', async () => {
+    await sb.from('reading_club_members').delete().eq('club_id', id).eq('user_id', currentUser.id);
+    renderClub(id);
+  });
+  document.getElementById('clubNextBtn')?.addEventListener('click', async () => {
+    await sb.from('reading_clubs').update({ current_chapter: club.current_chapter + 1 }).eq('id', id);
+    renderClub(id);
+  });
+  document.getElementById('clubPrevBtn')?.addEventListener('click', async () => {
+    await sb.from('reading_clubs').update({ current_chapter: Math.max(0, club.current_chapter - 1) }).eq('id', id);
+    renderClub(id);
+  });
+  document.getElementById('clubFinishBtn')?.addEventListener('click', async () => {
+    if (!confirm('Kulüp tamamlandı olarak işaretlensin mi?')) return;
+    await sb.from('reading_clubs').update({ status: 'finished' }).eq('id', id);
+    renderClub(id);
+  });
+  document.getElementById('clubReopenBtn')?.addEventListener('click', async () => {
+    await sb.from('reading_clubs').update({ status: 'active' }).eq('id', id);
+    renderClub(id);
+  });
+  document.getElementById('clubDeleteBtn')?.addEventListener('click', async () => {
+    if (!confirm('Kulüp silinsin mi?')) return;
+    const { error: e2 } = await sb.from('reading_clubs').delete().eq('id', id);
+    if (e2) return alert('Silinemedi: ' + e2.message);
+    location.hash = `#/read/${encodeURIComponent(post.id)}`;
   });
 }
 
@@ -7428,6 +7876,7 @@ async function route() {
   }
   if (view !== 'relay' && relayRealtime) { sb?.removeChannel(relayRealtime); relayRealtime = null; }
   if (readScrollHandler) { window.removeEventListener('scroll', readScrollHandler); readScrollHandler = null; }
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
   stopCameraStream();
   window.scrollTo(0, 0);
   setNav();
@@ -7462,6 +7911,7 @@ async function route() {
   if (view === 'topluluk') return renderCommunity(safeDecode(arg), query);
   if (view === 'seri') return renderSeries(safeDecode(arg));
   if (view === 'liste') return renderSharedList(safeDecode(arg));
+  if (view === 'kulup') return renderClub(safeDecode(arg));
   if (view === 'ayin-halkasi') return renderAyinHalkasi(query);
   if (view === 'meydan-okuma') return renderChallenges();
   if (view === 'kritik') return renderCritique();
@@ -7610,7 +8060,61 @@ document.getElementById('halkaHelperClose').addEventListener('click', () => {
   helperPanel.hidden = true;
   helperToggle.setAttribute('aria-expanded', 'false');
 });
-helperPanel.querySelectorAll('[data-help]').forEach(button => button.addEventListener('click', () => showHelperReply(button.dataset.help, true)));
+helperPanel.querySelectorAll('[data-help]').forEach(button => button.addEventListener('click', () => {
+  if (button.dataset.help === 'oneri') return cemberSuggest();
+  showHelperReply(button.dataset.help, true);
+}));
+
+// Çember öneri botu: haftalık tema, taslaklar, streak, meydan okuma ve kritik
+// kuyruğuna bakıp bağlamsal öneri üretir.
+async function cemberSuggest() {
+  helperAnswer.innerHTML = 'Hmm, sana bakıyorum… 🔍';
+  try {
+    const tips = [];
+    const now = Date.now();
+
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: theme } = await sb.from('weekly_themes').select('id,title,prompt')
+      .eq('active', true).lte('starts_on', today).gte('ends_on', today)
+      .order('starts_on', { ascending: false }).limit(1).maybeSingle();
+    if (theme) tips.push(`🗓️ Bu haftanın teması <strong>"${esc(theme.title)}"</strong> — katılmak istersen <a href="#/write?kind=blog&theme=${encodeURIComponent(theme.id)}">yazı formu hazır</a>.`);
+
+    const { data: chs } = await sb.from('challenges').select('id,title,ends_at').order('ends_at', { ascending: true }).limit(5);
+    const activeCh = (chs || []).find(c => now <= +new Date(c.ends_at) && now >= +new Date(c.starts_at));
+    if (activeCh) tips.push(`⚡ Aktif meydan okuma var: <strong>"${esc(activeCh.title)}"</strong> — <a href="#/meydan-okuma">bak buradan</a>.`);
+
+    if (!currentUser) {
+      tips.push('👋 Giriş yaparsan sana özel öneriler de üretebilirim — mesela taslakların, zincirin, serilerin.');
+      tips.push('🔭 Bu arada <a href="#/section/kesfet?sub=hizli">Hızlı Keşfet</a>\'e dalıp havanı bulabilirsin.');
+      helperAnswer.innerHTML = tips.join('<br><br>');
+      return;
+    }
+
+    const { count: draftCount } = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('author_id', currentUser.id).eq('is_draft', true);
+    if (draftCount) tips.push(`📝 <strong>${draftCount} taslağın</strong> rafta bekliyor — <a href="#/profile">profilinde 📝 işaretliler</a>, hazırsa yayınla.`);
+
+    const { data: streak } = await sb.rpc('production_streak', { target: currentUser.id });
+    const st = Number(streak?.streak || 0);
+    if (st > 0) tips.push(`🔗 Zincirin <strong>${st} gün</strong> — bugün bir şey paylaşırsan ${st + 1} olur.`);
+    else tips.push('🔗 Zincirin şu an sıfır — küçük de olsa bir şey paylaş, yarın başlasın.');
+
+    const { count: myPosts } = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('author_id', currentUser.id).eq('is_draft', false);
+    if (!myPosts) tips.push('🌱 Henüz yayınlanmış eserin yok — ilk eserin İlk Eser rozetini açar ✦');
+
+    const { count: critCount } = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('critique_wanted', true).neq('author_id', currentUser.id);
+    if (critCount) tips.push(`🎯 ${critCount} eser kritik bekliyor — <a href="#/kritik">bir eşleşme çek</a>, hem ona hem sana iyi gelir.`);
+
+    const { data: myPostIds } = await sb.from('posts').select('id').eq('author_id', currentUser.id).limit(200);
+    if ((myPostIds || []).length) {
+      const { data: pc } = await sb.from('post_continuations').select('id').eq('status', 'pending').in('post_id', myPostIds.map(p => p.id)).limit(1);
+      if (pc?.length) tips.push('✍️ Eserine bekleyen bir devam önerisi var — eser sayfanda "Devam önerileri" bölümüne bak.');
+    }
+
+    helperAnswer.innerHTML = (tips.length ? tips : ['✨ Her şey yolunda görünüyor — yeni bir eser mi yazsak? <a href="#/write">+ menüsü seni bekliyor</a>.']).slice(0, 4).join('<br><br>');
+  } catch (err) {
+    helperAnswer.textContent = 'Öneri üretirken bir şey takıldı — ama niyetim iyiydi. Tekrar dene?';
+  }
+}
 document.getElementById('halkaHelperForm').addEventListener('submit', event => {
   event.preventDefault();
   const question = document.getElementById('halkaHelperInput').value.toLocaleLowerCase('tr-TR');
