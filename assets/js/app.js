@@ -2437,14 +2437,28 @@ async function renderRead(id, query = '') {
         ${isCurrentUserAdmin ? '<button class="btn ghost small" id="adminFlagPost" type="button">⚑ İncelemeye al</button>' : ''}
     </div>
     ${isOwner ? '<div id="readStatsPanel" hidden></div>' : ''}
-    ${isOwner && betaReports.length ? `<section class="card">
-      <div class="section-head"><h3 style="margin:0">🔬 Beta raporları (${betaReports.length})</h3></div>
-      ${betaReports.map(b => `<div class="member-row" style="align-items:flex-start">
-        <a class="member-id" href="#/user/${encodeURIComponent(b.reader_id)}"><span class="avatar">${initials(displayName(betaReaderProfiles[b.reader_id]))}</span><span>${esc(displayName(betaReaderProfiles[b.reader_id]))}<br><span class="small">${b.done_at ? `✅ ${esc(formatDate(b.done_at))}` : '⏳ okuyor'}</span></span></a>
+    ${isOwner ? `<section class="card">
+      <div class="section-head"><h3 style="margin:0">🔬 Beta okurlar${betaReports.length ? ` (${betaReports.length})` : ''}</h3></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <input id="betaInviteName" maxlength="20" placeholder="@kullanici_adi" style="flex:1;min-width:140px">
+        <select id="betaInviteSpan">
+          <option value="">Eser yayınlanana kadar</option>
+          <option value="24">24 saat</option>
+          <option value="72">3 gün</option>
+          <option value="168">7 gün</option>
+        </select>
+        <button class="btn ghost small" id="betaInviteBtn" type="button">✉️ Davet et</button>
+        <span id="betaInviteMsg" class="small" aria-live="polite"></span>
+      </div>
+      ${betaReports.map(b => {
+        const expired = b.expires_at && +new Date(b.expires_at) <= Date.now();
+        return `<div class="member-row" style="align-items:flex-start;${expired ? 'opacity:.6' : ''}">
+        <a class="member-id" href="#/user/${encodeURIComponent(b.reader_id)}"><span class="avatar">${initials(displayName(betaReaderProfiles[b.reader_id]))}</span><span>${esc(displayName(betaReaderProfiles[b.reader_id]))}<br><span class="small">${b.invited ? '✉️ davet' : '🎲 gönüllü'} · ${expired ? 'süresi doldu' : b.expires_at ? `⏳ ${esc(new Date(b.expires_at).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }))}'e kadar` : 'yayına kadar'} · ${b.done_at ? `✅ ${esc(formatDate(b.done_at))}` : 'okuyor'}</span></span></a>
         ${b.feedback ? `<div class="interview-body" style="flex:1;padding:6px 10px;border:1px solid var(--line);border-radius:8px">${esc(b.feedback)}</div>` : ''}
         <button class="btn ghost small beta-kick" data-match="${esc(b.id)}" type="button" title="Okur erişimini kaldır">🗑</button>
-      </div>`).join('')}
-      <div class="small">Beta okurlar ${post.is_draft ? 'taslağını görebilir' : 'eserini okuyabilir'}; geri bildirimleri yalnızca sana görünür.</div>
+      </div>`;
+      }).join('')}
+      <div class="small">Beta okurlar ${post.is_draft ? 'taslağını görebilir' : 'eserini okuyabilir'}; geri bildirimleri yalnızca sana görünür. Süre dolunca ya da eser yayınlanınca erişim kendiliğinden kapanır.</div>
     </section>` : ''}
     ${canReportPost ? reportFormHTML('post', post.id, 'report-form', 'postReportForm') : ''}
     ${chapterError ? `<div class="empty">Bölümler yüklenemedi.<br><span class="small">${esc(chapterError.message)}</span></div>` : ''}
@@ -2859,6 +2873,23 @@ async function renderRead(id, query = '') {
     if (error) return alert('Kaldırılamadı: ' + error.message);
     renderRead(post.id);
   }));
+  document.getElementById('betaInviteBtn')?.addEventListener('click', async () => {
+    const msg = document.getElementById('betaInviteMsg');
+    const username = (document.getElementById('betaInviteName')?.value || '').trim().replace(/^@+/, '').toLowerCase();
+    if (!username) { msg.textContent = 'Bir kullanıcı adı yaz.'; return; }
+    const { data: target } = await sb.from('profiles').select('id,username').eq('username', username).maybeSingle();
+    if (!target) { msg.textContent = 'Kullanıcı bulunamadı.'; return; }
+    if (target.id === currentUser.id) { msg.textContent = 'Kendini davet edemezsin.'; return; }
+    if (betaReports.some(b => b.reader_id === target.id)) { msg.textContent = 'Bu kullanıcı zaten beta okurun.'; return; }
+    const hours = Number(document.getElementById('betaInviteSpan')?.value || 0);
+    const { error } = await sb.from('beta_matches').insert({
+      post_id: post.id, reader_id: target.id, invited: true,
+      expires_at: hours > 0 ? new Date(Date.now() + hours * 3600000).toISOString() : null
+    });
+    if (error) { msg.textContent = 'Davet edilemedi: ' + error.message; return; }
+    try { await sb.from('notifications').insert({ user_id: target.id, actor_id: currentUser.id, type: 'beta_invite', post_id: post.id }); } catch {}
+    renderRead(post.id);
+  });
   document.getElementById('contForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const f = e.target;
@@ -4499,7 +4530,8 @@ async function renderNotifications() {
     follow: 'seni takip etmeye başladı',
     new_post: 'yeni bir eser paylaştı',
     relay: 'nöbetleşe hikâyede seni bekliyor',
-    continuation: 'devam önerini bölüm olarak yayınladı 🎉'
+    continuation: 'devam önerini bölüm olarak yayınladı 🎉',
+    beta_invite: 'seni eserine beta okur olarak davet etti 🔬'
   };
   const targetFor = n => {
     if (n.type === 'badge') return '#/profile';
