@@ -178,7 +178,7 @@ const BADGE_DEFS = [
   { key: 'safak', name: 'Şafak', desc: 'Şafak vaktinde (05.00–07.00) eser paylaştın', icon: '🌅', secret: true },
   { key: 'gece_yazari', name: 'Gece Yazarı', desc: 'Gece saatlerinde 10 eser paylaştın', icon: '🌙', secret: true },
   { key: 'sansli_gun', name: 'Şanslı Gün', desc: 'Ayın 13’ünde saat 13’te paylaştın', icon: '🍀', secret: true },
-  { key: 'erken_kus', name: 'Erken Kuş', desc: 'İlk 100 üyeden birisin', icon: '🐣', secret: true },
+  { key: 'erken_kus', name: 'Halkanın İlk Zincirlerinden', desc: 'İlk 100 üyeden birisin', icon: '🐣', secret: true },
   { key: 'sessiz_dev', name: 'Sessiz Dev', desc: 'Hiç yorum yapmadan 20 eser paylaştın', icon: '🗿', secret: true },
   { key: 'ilk_yorumcu', name: 'İlk Yorumcu', desc: '10 esere ilk yorumu sen yazdın', icon: '⚡', secret: true },
   { key: 'hafta_sonu', name: 'Hafta Sonu Savaşçısı', desc: '4 hafta üst üste hafta sonu paylaştın', icon: '🎪', secret: true },
