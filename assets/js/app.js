@@ -4311,20 +4311,23 @@ function openPanelComposer(onDone) {
   const modal = document.createElement('div');
   modal.className = 'badge-modal-backdrop';
   modal.innerHTML = `
-    <div class="card badge-modal" style="max-width:820px;text-align:left">
+    <div class="card badge-modal pc-modal">
       <button class="badge-modal-close" type="button" aria-label="Kapat">✕</button>
-      <h3 style="text-align:center">🎨 Panel oluşturucu</h3>
-      <div class="canvas-tool-row" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">
+      <h3 style="text-align:center;margin:0 0 10px">🎨 Panel oluşturucu</h3>
+      <div class="canvas-tool-row" style="flex-wrap:wrap;gap:6px;margin-bottom:8px">
         <label class="small">Şablon</label>
         <select id="pcLayout">${Object.keys(LAYOUTS).map(k => `<option>${k}</option>`).join('')}</select>
-        <button class="btn ghost small pc-tool on" data-tool="pen" type="button">✏️ Kalem</button>
-        <button class="btn ghost small pc-tool" data-tool="bubble" type="button">💬 Balon</button>
-        <button class="btn ghost small pc-tool" data-tool="move" type="button">✋ Taşı</button>
-        <input type="color" id="pcColor" value="#111111" title="Kalem rengi">
-        <button class="btn ghost small" id="pcImgBtn" type="button">🖼️ Panele görsel</button>
+        <button class="btn ghost small pc-tool on" data-tool="pen" type="button">✏️</button>
+        <button class="btn ghost small pc-tool" data-tool="marker" type="button">🖊️</button>
+        <button class="btn ghost small pc-tool" data-tool="eraser" type="button">🧽</button>
+        <button class="btn ghost small pc-tool" data-tool="bubble" type="button">💬</button>
+        <button class="btn ghost small pc-tool" data-tool="move" type="button">✋</button>
+        <input type="range" id="pcSize" min="2" max="24" value="4" title="Boyut" style="width:70px">
+        <input type="color" id="pcColor" value="#111111" title="Renk">
+        <button class="btn ghost small" id="pcImgBtn" type="button">🖼️</button>
         <input id="pcImgFile" type="file" accept="image/jpeg,image/png,image/webp" hidden>
-        <button class="btn ghost small" id="pcUndo" type="button">Geri al</button>
-        <button class="btn ghost small" id="pcClear" type="button">Temizle</button>
+        <button class="btn ghost small" id="pcUndo" type="button">↩</button>
+        <button class="btn ghost small" id="pcClear" type="button">🗑</button>
       </div>
       <div id="pcBubbleBar" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
         <select id="pcBubbleType">
@@ -4334,7 +4337,7 @@ function openPanelComposer(onDone) {
         <input id="pcBubbleText" maxlength="120" placeholder="Balon metni…" style="flex:1;min-width:160px">
         <span class="small">Sonra panelde bir yere tıkla.</span>
       </div>
-      <canvas id="pcCanvas" width="${W}" height="${H}" style="width:100%;border:1px solid var(--line);border-radius:8px;touch-action:none;cursor:crosshair"></canvas>
+      <canvas id="pcCanvas" width="${W}" height="${H}" class="pc-canvas"></canvas>
       <div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
         <button class="btn primary" id="pcDone" type="button">Sayfayı kullan</button>
       </div>
@@ -4430,9 +4433,12 @@ function openPanelComposer(onDone) {
       }
       p.strokes.forEach(st => {
         ctx.strokeStyle = st.color; ctx.lineWidth = st.size; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        if (st.erase) ctx.globalCompositeOperation = 'destination-out';
+        else if (st.alpha) ctx.globalAlpha = st.alpha;
         ctx.beginPath();
         st.pts.forEach((pt, j) => j ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y));
         ctx.stroke();
+        ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
       });
       ctx.restore();
       ctx.lineWidth = BORDER; ctx.strokeStyle = '#111'; ctx.strokeRect(p.x, p.y, p.w, p.h);
@@ -4445,9 +4451,16 @@ function openPanelComposer(onDone) {
     e.preventDefault();
     const { x, y } = pos(e);
     const pi = panelAt(x, y);
-    if (tool === 'pen' && pi >= 0) {
+    if (['pen','marker','eraser'].includes(tool) && pi >= 0) {
       drawing = true; activePanel = pi;
-      const st = { color: modal.querySelector('#pcColor').value, size: 4, pts: [{ x, y }] };
+      const size = Number(modal.querySelector('#pcSize').value);
+      const st = {
+        color: modal.querySelector('#pcColor').value,
+        size: tool === 'marker' ? size * 3 : tool === 'eraser' ? size * 3 : size,
+        alpha: tool === 'marker' ? 0.4 : 1,
+        erase: tool === 'eraser',
+        pts: [{ x, y }]
+      };
       panels[pi].strokes.push(st); ops.push({ type: 'stroke', panel: pi, ref: st });
       redraw();
     } else if (tool === 'bubble' && pi >= 0) {
@@ -4485,6 +4498,7 @@ function openPanelComposer(onDone) {
     tool = b.dataset.tool;
     modal.querySelectorAll('.pc-tool').forEach(x => x.classList.toggle('on', x === b));
     modal.querySelector('#pcBubbleBar').style.display = tool === 'bubble' ? 'flex' : 'none';
+    modal.querySelector('#pcColor').style.visibility = ['pen','marker'].includes(tool) ? 'visible' : 'hidden';
     canvas.style.cursor = tool === 'move' ? 'grab' : 'crosshair';
   }));
   modal.querySelector('#pcImgBtn').addEventListener('click', () => modal.querySelector('#pcImgFile').click());
