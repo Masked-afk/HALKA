@@ -141,6 +141,8 @@ hr{border:0;border-top:1px solid var(--line);margin:22px 0}
 }
 .quick-card{height:100%;min-height:100%;scroll-snap-align:start;scroll-snap-stop:always;position:relative;overflow:hidden;background:#0b0b09;isolation:isolate}
 .quick-visual,.quick-shade{position:absolute;inset:0}
+.quick-mute{position:absolute;right:16px;top:64px;z-index:3;width:44px;height:44px;border-radius:50%;border:1px solid #ffffff30;background:#181814d0;color:#fff;font-size:20px;display:grid;place-items:center;cursor:pointer;backdrop-filter:blur(8px)}
+.quick-mute:hover{background:#181814}
 .quick-media{width:100%;height:100%;display:block;object-fit:contain;background:#080807}.quick-card video.quick-media{cursor:pointer}
 .quick-shade{background:linear-gradient(to bottom,transparent 34%,#0004 58%,#000e 100%);pointer-events:none}
 .quick-book{height:100%;display:grid;grid-template-columns:minmax(160px,43%) 1fr;align-items:center;gap:28px;padding:50px 38px;background:radial-gradient(circle at 25% 35%,#433823 0,transparent 42%),linear-gradient(145deg,#1c1b17,#0d0d0b)}

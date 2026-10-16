@@ -4834,7 +4834,7 @@ function quickTypeLabel(post) {
 
 function quickVisualHTML(post) {
   if (post.type === 'video' && /^https?:\/\//.test(post.media_url || '')) {
-    return `<video class="quick-media" src="${esc(post.media_url)}" muted loop playsinline preload="metadata" title="Sesi açmak veya kapatmak için dokun"${post.allow_download ? '' : ' controlsList="nodownload" oncontextmenu="return false"'}></video>`;
+    return `<video class="quick-media" src="${esc(post.media_url)}" muted loop playsinline preload="metadata"${post.allow_download ? '' : ' controlsList="nodownload" oncontextmenu="return false"'}></video><button class="quick-mute" type="button" aria-label="Sesi aç/kapat">🔇</button>`;
   }
   if ((post.type === 'photo' || post.type === 'drawing') && /^https?:\/\//.test(post.media_url || '')) {
     return `<img class="quick-media" src="${esc(post.media_url)}" alt="${esc(post.title || '')}" loading="lazy"${post.allow_download ? '' : ' oncontextmenu="return false" draggable="false"'}>`;
@@ -4868,10 +4868,16 @@ function interleaveQuickPosts(posts) {
 function bindQuickFeed(feed) {
   const cards = [...feed.querySelectorAll('.quick-card')];
   const counter = document.getElementById('quickCounter');
+  let quickMuted = localStorage.getItem('halka_quick_muted') !== '0';
+  const applyMute = () => feed.querySelectorAll('video').forEach(v => {
+    v.muted = quickMuted;
+    const btn = v.closest('.quick-visual')?.querySelector('.quick-mute');
+    if (btn) btn.textContent = quickMuted ? '🔇' : '🔊';
+  });
   const activate = card => {
     cards.forEach(item => item.querySelector('video')?.pause());
     const video = card.querySelector('video');
-    if (video) video.play().catch(() => {});
+    if (video) { video.muted = quickMuted; video.play().catch(() => {}); }
     if (counter) counter.textContent = `${Number(card.dataset.index) + 1} / ${cards.length}`;
   };
   const observer = new IntersectionObserver(entries => {
@@ -4879,10 +4885,20 @@ function bindQuickFeed(feed) {
     if (visible?.intersectionRatio >= .6) activate(visible.target);
   }, { root: feed, threshold: [.6, .8] });
   cards.forEach(card => observer.observe(card));
-  feed.querySelectorAll('video').forEach(video => video.addEventListener('click', () => {
-    video.muted = !video.muted;
-    video.title = video.muted ? 'Sesi açmak için dokun' : 'Sesi kapatmak için dokun';
-  }));
+  const toggleMute = video => {
+    quickMuted = !quickMuted;
+    localStorage.setItem('halka_quick_muted', quickMuted ? '1' : '0');
+    applyMute();
+    video?.play().catch(() => {});
+  };
+  feed.querySelectorAll('video').forEach(video => {
+    video.addEventListener('click', () => toggleMute(video));
+    video.closest('.quick-visual')?.querySelector('.quick-mute')?.addEventListener('click', e => {
+      e.stopPropagation();
+      toggleMute(video);
+    });
+  });
+  applyMute();
   feed.querySelectorAll('.quick-like').forEach(button => button.addEventListener('click', async () => {
     if (!currentUser) { location.hash = '#/auth?signup'; return; }
     const postId = button.dataset.postId;
