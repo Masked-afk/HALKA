@@ -1508,14 +1508,21 @@ function renderWrite() {
         <h2 id="writingBodyHeading">Yazı içeriği</h2>
         <p id="writingTemplateHelp" class="small"></p>
         <button class="btn ghost small" id="insertWritingTemplate" type="button">Örnek iskeleti ekle</button>
-        <div class="field">
+        <div class="field" id="chapterTitleField">
           <label for="chapter_title">İçerik başlığı</label>
           <input id="chapter_title" name="chapter_title" maxlength="120" placeholder="Yazı">
         </div>
-        <div class="field">
+        <div class="field" id="chapterBodyField">
           <label for="chapter_body">Yazı metni</label>
           <div class="rich-tools" id="chapterTools" hidden><button class="btn ghost small" type="button" data-wrap="**">Kalın: **…**</button><button class="btn ghost small" type="button" data-wrap="()">İtalik: (…)</button></div>
           <textarea id="chapter_body" name="chapter_body" required maxlength="50000" placeholder="Yazını buraya yaz…"></textarea>
+        </div>
+        <div class="field" id="mangaPagesField" hidden>
+          <label>Manga sayfaları</label>
+          <input id="mangaPageFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+          <div class="small">Çizdiğin sayfaları yükle (sırayla okunur) veya panel oluşturucuyla tarayıcıda çiz.</div>
+          <button class="btn ghost small" id="panelComposerBtn" type="button">🎨 Panel oluşturucu</button>
+          <div id="mangaPagesList" class="manga-page-list"></div>
         </div>
         <button class="btn primary" type="submit">Eseri yayımla</button>
       </form>
@@ -1551,10 +1558,10 @@ function renderWrite() {
     manga: {
       title: 'Manga adı', titlePlaceholder: 'Manganın adını yaz…',
       description: 'Manga tanıtımı', descriptionPlaceholder: 'Manganın konusunu, kahramanını ve tonunu birkaç cümleyle anlat…',
-      heading: 'İlk bölüm', help: 'Manga, düzyazı değil sayfa/panel senaryosu olarak yazılır:\n1. Sayfa ve panel numarası ver.\n2. Her panelde kadrajı 1-2 cümleyle anlat (yakın plan, açı, ifade, ışık).\n3. Diyalogu KARAKTER: replik biçiminde panelin altına yaz — balon başına kısa tut.\n4. Ses efektlerini SFX: ile belirt.\n5. Büyük sürprizi sağ sayfanın son paneline sakla — sayfa çevirme şoku!\n\nBiçim: **kalın**, (italik).',
-      chapterLabel: 'Bölüm adı', chapterPlaceholder: '1. Bölüm', bodyLabel: 'Bölüm senaryosu',
-      bodyPlaceholder: 'Sayfa 1\n\nPanel 1 — kadraj tasviri…\nKARAKTER: replik\nSFX: …\n\nPanel 2 — …',
-      starter: 'Sayfa 1\n\nPanel 1 — Geniş açı: mekânı ve atmosferi kur.\nKAHRAMAN: (açılış repliği)\n\nPanel 2 — Yakın plan: kahramanın ifadesi.\nSFX: …\n\nPanel 3 — Aksiyon ya da olay kıvılcımı.\n\n…\n\nSon sayfanın son paneli — bölümün en büyük vuruşu / kancası.'
+      heading: 'Manga sayfaları', help: 'Manga görseldir — sayfaları çizilmiş olarak yükle veya panel oluşturucuyla tarayıcıda çiz:\n1. Hazır sayfa görsellerini seç (sırayla okunur).\n2. Ya da 🎨 Panel oluşturucu: şablon seç, panele çiz/görsel koy, konuşma balonu ekle.\n3. Büyük vuruşu sayfa sonuna sakla — sayfa çevirme şoku!\n4. İstersen metin alanını senaryo taslağı için de kullanabilirsin.',
+      chapterLabel: 'Senaryo taslağı (isteğe bağlı)', chapterPlaceholder: 'Senaryo', bodyLabel: 'Senaryo / not metni',
+      bodyPlaceholder: 'Sayfa 1\n\nPanel 1 — kadraj tasviri…\nKARAKTER: replik\nSFX: …',
+      starter: ''
     },
     light_novel: {
       title: 'Light novel adı', titlePlaceholder: 'Eserinin adını yaz…',
@@ -1573,8 +1580,12 @@ function renderWrite() {
     document.getElementById('description').placeholder = t.descriptionPlaceholder;
     document.getElementById('writingBodyHeading').textContent = t.heading;
     document.getElementById('writingTemplateHelp').textContent = t.help;
+    const isManga = kind === 'manga';
     document.getElementById('bookCoverField').hidden = !isChapteredKind(kind);
     document.getElementById('chapterTools').hidden = !isChapteredKind(kind);
+    document.getElementById('chapter_body').required = !isManga;
+    document.getElementById('mangaPagesField').hidden = !isManga;
+    document.getElementById('insertWritingTemplate').hidden = isManga;
     document.querySelector('label[for="chapter_title"]').textContent = t.chapterLabel;
     document.getElementById('chapter_title').placeholder = t.chapterPlaceholder;
     document.querySelector('label[for="chapter_body"]').textContent = t.bodyLabel;
@@ -1588,6 +1599,38 @@ function renderWrite() {
   };
   document.getElementById('kind').addEventListener('change', e => applyWritingTemplate(e.target.value));
   document.getElementById('coverMakerBtn')?.addEventListener('click', () => openCoverMaker());
+
+  const mangaPages = [];
+  const renderMangaPages = () => {
+    const list = document.getElementById('mangaPagesList');
+    list.innerHTML = mangaPages.map((p, i) => `
+      <div class="manga-page-item">
+        <img src="${p.url}" alt="Sayfa ${i + 1}">
+        <span class="small">Sayfa ${i + 1}</span>
+        <button class="para-badge manga-page-del" type="button" data-i="${i}" title="Kaldır" style="position:static;opacity:1">✕</button>
+      </div>`).join('');
+    list.querySelectorAll('.manga-page-del').forEach(b => b.addEventListener('click', () => {
+      URL.revokeObjectURL(mangaPages[b.dataset.i].url);
+      mangaPages.splice(Number(b.dataset.i), 1);
+      renderMangaPages();
+    }));
+  };
+  document.getElementById('mangaPageFiles').addEventListener('change', e => {
+    for (const file of e.target.files || []) {
+      if (!['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 15 * 1024 * 1024) {
+        showMessage(`"${file.name}" atlandı — JPG/PNG/WebP ve 15 MB altı olmalı.`, true); continue;
+      }
+      mangaPages.push({ blob: file, url: URL.createObjectURL(file) });
+    }
+    e.target.value = '';
+    renderMangaPages();
+  });
+  document.getElementById('panelComposerBtn').addEventListener('click', () => {
+    openPanelComposer(blob => {
+      mangaPages.push({ blob, url: URL.createObjectURL(blob) });
+      renderMangaPages();
+    });
+  });
   document.getElementById('bookCover').addEventListener('change', event => {
     const file = event.currentTarget.files?.[0];
     const preview = document.getElementById('bookCoverPreview');
@@ -1643,12 +1686,34 @@ function renderWrite() {
         theme_id: new URLSearchParams(location.hash.split('?')[1] || '').get('theme') || null
       };
       if (coverPath) postValues.cover_path = coverPath;
+      if (kind === 'manga' && !mangaPages.length && !chapterBody) {
+        showMessage('Manga için en az bir sayfa yükle, panel oluşturucuyla çiz ya da senaryo metni yaz.', true); return;
+      }
       const { data: post, error } = await sb.from('posts').insert(postValues).select().single();
       if (error) {
         if (coverPath) await sb.storage.from('profile-images').remove([coverPath]);
         showMessage('Eser oluşturulamadı: ' + error.message, true); return;
       }
-      if (chapterBody) {
+      if (kind === 'manga') {
+        for (let i = 0; i < mangaPages.length; i++) {
+          const page = await compressImage(mangaPages[i].blob, 1600);
+          const ext = page.type === 'image/webp' ? 'webp' : 'png';
+          const path = `${currentUser.id}/manga-pages/${post.id}/${i + 1}.${ext}`;
+          const up = await sb.storage.from('post-media').upload(path, page, { contentType: page.type, upsert: false });
+          if (up.error) { showMessage(`Sayfa ${i + 1} yüklenemedi: ` + up.error.message, true); return; }
+          const mediaUrl = sb.storage.from('post-media').getPublicUrl(path).data.publicUrl;
+          const { error: cErr } = await sb.from('chapters').insert({
+            post_id: post.id, position: i + 1, title: `Sayfa ${i + 1}`, body: '', media_url: mediaUrl
+          });
+          if (cErr) { showMessage(`Sayfa ${i + 1} kaydedilemedi: ` + cErr.message, true); return; }
+        }
+        if (chapterBody) {
+          await sb.from('chapters').insert({
+            post_id: post.id, position: mangaPages.length + 1,
+            title: chapterTitle || 'Senaryo', body: chapterBody
+          });
+        }
+      } else if (chapterBody) {
         const { error: chapterError } = await sb.from('chapters').insert({
           post_id: post.id, position: 1,
           title: chapterTitle || (isChapteredKind(String(form.get('kind'))) ? '1. Bölüm' : String(form.get('kind')) === 'short' ? 'Metin' : 'Yazı'),
@@ -2040,7 +2105,8 @@ async function renderRead(id, query = '') {
       return `
       <section class="chapter" id="chapter-${i}" data-chapter-index="${i}">
         <h3>${esc(ch.title || 'Bölüm')}</h3>
-        <div class="chapter-body">${renderParagraphs(ch.body || '', ch.id, paragraphCounts[ch.id] || {}, post.kind)}</div>
+        ${ch.media_url ? `<img class="manga-page-img" src="${esc(ch.media_url)}" alt="${esc(ch.title || 'Manga sayfası')}" loading="lazy">` : ''}
+        ${ch.body ? `<div class="chapter-body">${renderParagraphs(ch.body, ch.id, paragraphCounts[ch.id] || {}, post.kind)}</div>` : ''}
         <div class="chapter-comments">
           <button class="chapter-comments-toggle" data-chapter="${esc(ch.id)}" type="button">💬 Bölüm yorumları (<span>${chComments.length}</span>)</button>
           <div class="chapter-comments-panel" hidden>
@@ -2075,8 +2141,19 @@ async function renderRead(id, query = '') {
     ${isOwner ? `
       <hr>
         ${(!post.type || post.type === 'writing') ? `<section class="card">
-        <h3>Yeni bölüm ekle</h3>
+        <h3>${post.kind === 'manga' ? 'Yeni sayfa ekle' : 'Yeni bölüm ekle'}</h3>
         <form id="chapterForm">
+          ${post.kind === 'manga' ? `
+          <div class="field">
+            <label>Sayfa görselleri</label>
+            <input id="cpageFiles" type="file" accept="image/jpeg,image/png,image/webp" multiple>
+            <button class="btn ghost small" id="cComposerBtn" type="button">🎨 Panel oluşturucu</button>
+            <div id="cPagesList" class="manga-page-list"></div>
+          </div>
+          <div class="field">
+            <label for="cbody">Not / senaryo (isteğe bağlı)</label>
+            <textarea id="cbody" name="cbody"></textarea>
+          </div>` : `
           <div class="field">
             <label for="ctitle">Bölüm başlığı</label>
             <input id="ctitle" name="ctitle" required maxlength="120">
@@ -2085,8 +2162,8 @@ async function renderRead(id, query = '') {
             <label for="cbody">Metin</label>
             ${isChapteredKind(post.kind) ? '<div class="rich-tools" id="newChapterTools"><button class="btn ghost small" type="button" data-wrap="**">Kalın: **…**</button><button class="btn ghost small" type="button" data-wrap="()">İtalik: (…)</button></div>' : ''}
             <textarea id="cbody" name="cbody" required></textarea>
-          </div>
-          <button class="btn primary" type="submit">Bölümü ekle</button>
+          </div>`}
+          <button class="btn primary" type="submit">${post.kind === 'manga' ? 'Sayfaları ekle' : 'Bölümü ekle'}</button>
           <div id="message" class="message"></div>
         </form>
       </section>` : ''}
@@ -2313,10 +2390,52 @@ async function renderRead(id, query = '') {
   if (!isOwner) return;
 
   if (isChapteredKind(post.kind)) bindRichTextTools(document.getElementById('newChapterTools'), document.getElementById('cbody'));
+
+  const pendingPages = [];
+  const renderCPages = () => {
+    const list = document.getElementById('cPagesList');
+    if (!list) return;
+    list.innerHTML = pendingPages.map((p, i) => `
+      <div class="manga-page-item"><img src="${p.url}" alt="Sayfa"><button class="para-badge manga-page-del" type="button" data-i="${i}" style="position:static;opacity:1">✕</button></div>`).join('');
+    list.querySelectorAll('.manga-page-del').forEach(b => b.addEventListener('click', () => {
+      URL.revokeObjectURL(pendingPages[b.dataset.i].url);
+      pendingPages.splice(Number(b.dataset.i), 1); renderCPages();
+    }));
+  };
+  document.getElementById('cpageFiles')?.addEventListener('change', e => {
+    for (const f of e.target.files || []) {
+      if (!['image/jpeg','image/png','image/webp'].includes(f.type) || f.size > 15 * 1024 * 1024) continue;
+      pendingPages.push({ blob: f, url: URL.createObjectURL(f) });
+    }
+    e.target.value = ''; renderCPages();
+  });
+  document.getElementById('cComposerBtn')?.addEventListener('click', () => {
+    openPanelComposer(blob => { pendingPages.push({ blob, url: URL.createObjectURL(blob) }); renderCPages(); });
+  });
   document.getElementById('chapterForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const form = new FormData(e.target);
     const last = (chapters || []).reduce((m, c) => Math.max(m, c.position || 0), 0);
+    if (post.kind === 'manga') {
+      const note = String(form.get('cbody') || '').trim();
+      if (!pendingPages.length && !note) return showMessage('En az bir sayfa ekle veya not yaz.', true);
+      const btn = e.target.querySelector('button[type="submit"]'); btn.disabled = true;
+      for (let i = 0; i < pendingPages.length; i++) {
+        const page = await compressImage(pendingPages[i].blob, 1600);
+        const ext = page.type === 'image/webp' ? 'webp' : 'png';
+        const path = `${currentUser.id}/manga-pages/${post.id}/${Date.now()}-${i}.${ext}`;
+        const up = await sb.storage.from('post-media').upload(path, page, { contentType: page.type, upsert: false });
+        if (up.error) { btn.disabled = false; return showMessage(`Sayfa yüklenemedi: ` + up.error.message, true); }
+        const mediaUrl = sb.storage.from('post-media').getPublicUrl(path).data.publicUrl;
+        const { error: cErr } = await sb.from('chapters').insert({
+          post_id: post.id, position: last + 1 + i, title: `Sayfa ${last + 1 + i}`, body: '', media_url: mediaUrl
+        });
+        if (cErr) { btn.disabled = false; return showMessage('Sayfa kaydedilemedi: ' + cErr.message, true); }
+      }
+      if (note) await sb.from('chapters').insert({ post_id: post.id, position: last + 1 + pendingPages.length, title: 'Senaryo', body: note });
+      renderRead(id);
+      return;
+    }
     const { error: insertError } = await sb.from('chapters').insert({
       post_id: post.id, position: last + 1,
       title: String(form.get('ctitle') || '').trim(),
@@ -4176,6 +4295,221 @@ function openCoverMaker() {
       close();
     }, 'image/png');
   });
+}
+
+// ---- Manga panel kompozitörü: şablon seç → panele çiz/görsel koy → balon ekle → PNG ----
+function openPanelComposer(onDone) {
+  const W = 760, H = 1080, GUT = 14, BORDER = 5;
+  const LAYOUTS = {
+    '1 tam sayfa': [[0, 0, 1, 1]],
+    '2 dikey': [[0, 0, 1, .5], [0, .5, 1, .5]],
+    '2 yatay': [[0, 0, .5, 1], [.5, 0, .5, 1]],
+    '3 (üst + 2 alt)': [[0, 0, 1, .5], [0, .5, .5, .5], [.5, .5, .5, .5]],
+    '4 ızgara': [[0, 0, .5, .5], [.5, 0, .5, .5], [0, .5, .5, .5], [.5, .5, .5, .5]],
+    '6 ızgara': [[0, 0, .5, 1 / 3], [.5, 0, .5, 1 / 3], [0, 1 / 3, .5, 1 / 3], [.5, 1 / 3, .5, 1 / 3], [0, 2 / 3, .5, 1 / 3], [.5, 2 / 3, .5, 1 / 3]]
+  };
+  const modal = document.createElement('div');
+  modal.className = 'badge-modal-backdrop';
+  modal.innerHTML = `
+    <div class="card badge-modal" style="max-width:820px;text-align:left">
+      <button class="badge-modal-close" type="button" aria-label="Kapat">✕</button>
+      <h3 style="text-align:center">🎨 Panel oluşturucu</h3>
+      <div class="canvas-tool-row" style="flex-wrap:wrap;gap:8px;margin-bottom:10px">
+        <label class="small">Şablon</label>
+        <select id="pcLayout">${Object.keys(LAYOUTS).map(k => `<option>${k}</option>`).join('')}</select>
+        <button class="btn ghost small pc-tool on" data-tool="pen" type="button">✏️ Kalem</button>
+        <button class="btn ghost small pc-tool" data-tool="bubble" type="button">💬 Balon</button>
+        <button class="btn ghost small pc-tool" data-tool="move" type="button">✋ Taşı</button>
+        <input type="color" id="pcColor" value="#111111" title="Kalem rengi">
+        <button class="btn ghost small" id="pcImgBtn" type="button">🖼️ Panele görsel</button>
+        <input id="pcImgFile" type="file" accept="image/jpeg,image/png,image/webp" hidden>
+        <button class="btn ghost small" id="pcUndo" type="button">Geri al</button>
+        <button class="btn ghost small" id="pcClear" type="button">Temizle</button>
+      </div>
+      <div id="pcBubbleBar" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+        <select id="pcBubbleType">
+          <option value="speech">Konuşma</option><option value="thought">Düşünce</option>
+          <option value="shout">Bağırma</option><option value="narration">Anlatıcı</option>
+        </select>
+        <input id="pcBubbleText" maxlength="120" placeholder="Balon metni…" style="flex:1;min-width:160px">
+        <span class="small">Sonra panelde bir yere tıkla.</span>
+      </div>
+      <canvas id="pcCanvas" width="${W}" height="${H}" style="width:100%;border:1px solid var(--line);border-radius:8px;touch-action:none;cursor:crosshair"></canvas>
+      <div style="display:flex;gap:10px;justify-content:center;margin-top:12px">
+        <button class="btn primary" id="pcDone" type="button">Sayfayı kullan</button>
+      </div>
+      <div id="pcMessage" class="message" aria-live="polite"></div>
+    </div>`;
+  document.body.appendChild(modal);
+  const close = () => modal.remove();
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  modal.querySelector('.badge-modal-close').addEventListener('click', close);
+
+  const canvas = modal.querySelector('#pcCanvas');
+  const ctx = canvas.getContext('2d');
+  let panels = [];          // {x,y,w,h, img, strokes:[], bubbles:[]}
+  let tool = 'pen', activePanel = -1, drawing = false, dragBubble = null;
+  const ops = [];           // undo geçmişi: {type:'stroke'|'bubble'|'img', panel, ref}
+
+  const setLayout = key => {
+    panels = LAYOUTS[key].map(([x, y, w, h]) => ({
+      x: x * W + GUT / 2, y: y * H + GUT / 2,
+      w: w * W - GUT, h: h * H - GUT,
+      img: null, strokes: [], bubbles: []
+    }));
+    ops.length = 0;
+    redraw();
+  };
+  const panelAt = (x, y) => panels.findIndex(p => x >= p.x && x <= p.x + p.w && y >= p.y && y <= p.y + p.h);
+  const pos = e => {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (W / r.width), y: (p.clientY - r.top) * (H / r.height) };
+  };
+
+  const drawBubble = b => {
+    ctx.save();
+    ctx.lineWidth = 2.5; ctx.strokeStyle = '#111'; ctx.fillStyle = '#fff';
+    const cx = b.x, cy = b.y, rx = b.w / 2, ry = b.h / 2;
+    ctx.beginPath();
+    if (b.type === 'narration') ctx.rect(cx - rx, cy - ry, b.w, b.h);
+    else if (b.type === 'shout') {
+      const spikes = 14;
+      for (let i = 0; i <= spikes * 2; i++) {
+        const a = (i / (spikes * 2)) * Math.PI * 2;
+        const rr = i % 2 ? 0.78 : 1;
+        const px = cx + Math.cos(a) * rx * rr, py = cy + Math.sin(a) * ry * rr;
+        i ? ctx.lineTo(px, py) : ctx.moveTo(px, py);
+      }
+      ctx.closePath();
+    } else {
+      ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+      if (b.type === 'thought') ctx.setLineDash([6, 5]);
+    }
+    ctx.fill(); ctx.stroke();
+    ctx.setLineDash([]);
+    if (b.type !== 'narration') { // kuyruk
+      ctx.beginPath();
+      if (b.type === 'thought') {
+        [[0, ry * 0.9, 7], [12, ry * 1.25, 4.5]].forEach(([dx, dy, r]) => {
+          ctx.moveTo(cx + dx + r, cy + dy); ctx.arc(cx + dx, cy + dy, r, 0, Math.PI * 2);
+        });
+        ctx.fill(); ctx.stroke();
+      } else {
+        ctx.moveTo(cx - rx * 0.35, cy + ry * 0.8);
+        ctx.lineTo(cx - rx * 0.1, cy + ry + 26);
+        ctx.lineTo(cx + rx * 0.05, cy + ry * 0.82);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+      }
+    }
+    // metin
+    ctx.fillStyle = '#111'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    let size = 18; ctx.font = `${size}px 'Segoe UI', sans-serif`;
+    const words = b.text.split(' ');
+    const lines = []; let line = '';
+    words.forEach(wd => {
+      const t = line ? `${line} ${wd}` : wd;
+      if (ctx.measureText(t).width > b.w - 22 && line) { lines.push(line); line = wd; } else line = t;
+    });
+    if (line) lines.push(line);
+    const lh = size + 4, ty = cy - ((lines.length - 1) * lh) / 2;
+    lines.slice(0, 5).forEach((l, i) => ctx.fillText(l, cx, ty + i * lh));
+    ctx.restore();
+  };
+
+  function redraw() {
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, W, H);
+    panels.forEach((p, i) => {
+      ctx.save();
+      ctx.beginPath(); ctx.rect(p.x, p.y, p.w, p.h); ctx.clip();
+      ctx.fillStyle = '#fff'; ctx.fillRect(p.x, p.y, p.w, p.h);
+      if (p.img) { // cover-fit
+        const s = Math.max(p.w / p.img.width, p.h / p.img.height);
+        const iw = p.img.width * s, ih = p.img.height * s;
+        ctx.drawImage(p.img, p.x + (p.w - iw) / 2, p.y + (p.h - ih) / 2, iw, ih);
+      }
+      p.strokes.forEach(st => {
+        ctx.strokeStyle = st.color; ctx.lineWidth = st.size; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        ctx.beginPath();
+        st.pts.forEach((pt, j) => j ? ctx.lineTo(pt.x, pt.y) : ctx.moveTo(pt.x, pt.y));
+        ctx.stroke();
+      });
+      ctx.restore();
+      ctx.lineWidth = BORDER; ctx.strokeStyle = '#111'; ctx.strokeRect(p.x, p.y, p.w, p.h);
+      if (i === activePanel) { ctx.lineWidth = 2; ctx.strokeStyle = '#E8923C'; ctx.strokeRect(p.x - 2, p.y - 2, p.w + 4, p.h + 4); }
+      p.bubbles.forEach(drawBubble);
+    });
+  }
+
+  const down = e => {
+    e.preventDefault();
+    const { x, y } = pos(e);
+    const pi = panelAt(x, y);
+    if (tool === 'pen' && pi >= 0) {
+      drawing = true; activePanel = pi;
+      const st = { color: modal.querySelector('#pcColor').value, size: 4, pts: [{ x, y }] };
+      panels[pi].strokes.push(st); ops.push({ type: 'stroke', panel: pi, ref: st });
+      redraw();
+    } else if (tool === 'bubble' && pi >= 0) {
+      const text = modal.querySelector('#pcBubbleText').value.trim();
+      if (!text) return;
+      const b = { x, y, w: 190, h: Math.min(120, 56 + Math.ceil(text.length / 22) * 22), type: modal.querySelector('#pcBubbleType').value, text };
+      panels[pi].bubbles.push(b); ops.push({ type: 'bubble', panel: pi, ref: b });
+      redraw();
+    } else if (tool === 'move') {
+      outer: for (const p of panels) for (const b of p.bubbles)
+        if (Math.hypot(x - b.x, y - b.y) < Math.max(b.w, b.h) / 2) { dragBubble = { b, dx: x - b.x, dy: y - b.y }; break outer; }
+    }
+  };
+  const move = e => {
+    if (!drawing && !dragBubble) return;
+    e.preventDefault();
+    const { x, y } = pos(e);
+    if (drawing) {
+      const st = panels[activePanel].strokes.at(-1);
+      st.pts.push({ x, y }); redraw();
+    } else if (dragBubble) {
+      dragBubble.b.x = x - dragBubble.dx; dragBubble.b.y = y - dragBubble.dy; redraw();
+    }
+  };
+  const up = () => { drawing = false; dragBubble = null; };
+  canvas.addEventListener('mousedown', down);
+  canvas.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', up);
+  canvas.addEventListener('touchstart', down, { passive: false });
+  canvas.addEventListener('touchmove', move, { passive: false });
+  canvas.addEventListener('touchend', up);
+
+  modal.querySelector('#pcLayout').addEventListener('change', e => setLayout(e.target.value));
+  modal.querySelectorAll('.pc-tool').forEach(b => b.addEventListener('click', () => {
+    tool = b.dataset.tool;
+    modal.querySelectorAll('.pc-tool').forEach(x => x.classList.toggle('on', x === b));
+    modal.querySelector('#pcBubbleBar').style.display = tool === 'bubble' ? 'flex' : 'none';
+    canvas.style.cursor = tool === 'move' ? 'grab' : 'crosshair';
+  }));
+  modal.querySelector('#pcImgBtn').addEventListener('click', () => modal.querySelector('#pcImgFile').click());
+  modal.querySelector('#pcImgFile').addEventListener('change', async e => {
+    const f = e.target.files?.[0]; e.target.value = '';
+    if (!f) return;
+    const pi = activePanel >= 0 ? activePanel : 0;
+    try { panels[pi].img = await createImageBitmap(f); ops.push({ type: 'img', panel: pi }); redraw(); }
+    catch { setSettingsMessage(modal.querySelector('#pcMessage'), 'Görsel yüklenemedi.', true); }
+  });
+  modal.querySelector('#pcUndo').addEventListener('click', () => {
+    const op = ops.pop(); if (!op) return;
+    if (op.type === 'img') panels[op.panel].img = null;
+    else { const arr = op.type === 'stroke' ? panels[op.panel].strokes : panels[op.panel].bubbles;
+      arr.splice(arr.indexOf(op.ref), 1); }
+    redraw();
+  });
+  modal.querySelector('#pcClear').addEventListener('click', () => setLayout(modal.querySelector('#pcLayout').value));
+  modal.querySelector('#pcDone').addEventListener('click', () => {
+    canvas.toBlob(blob => {
+      if (!blob) return setSettingsMessage(modal.querySelector('#pcMessage'), 'Sayfa oluşturulamadı.', true);
+      onDone(blob); close();
+    }, 'image/png');
+  });
+  setLayout('4 ızgara');
 }
 
 async function compressImage(file, maxDim = 1920, quality = 0.82) {
