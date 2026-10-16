@@ -1591,7 +1591,10 @@ function renderWrite() {
           <button class="btn ghost small" id="panelComposerBtn" type="button">🎨 Panel oluşturucu</button>
           <div id="mangaPagesList" class="manga-page-list"></div>
         </div>
-        <button class="btn primary" type="submit">Eseri yayımla</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn primary" type="submit">Eseri yayımla</button>
+          <button class="btn ghost" type="submit" id="draftBtn" title="Kimse görmeden kaydet — sonra yayınlarsın">📝 Taslak olarak kaydet</button>
+        </div>
       </form>
       <div id="message" class="message"></div>
     </section>
@@ -1736,11 +1739,12 @@ function renderWrite() {
     const chapterTitle = String(form.get('chapter_title') || '').trim();
     const chapterBody = String(form.get('chapter_body') || '').trim();
     const kind = String(form.get('kind') || 'blog');
+    const isDraft = e.submitter?.id === 'draftBtn';
     let coverFile = document.getElementById('bookCover').files?.[0] || null;
-    const submit = e.currentTarget.querySelector('button[type="submit"]');
+    const submit = e.submitter || e.currentTarget.querySelector('button[type="submit"]');
     if (!title) { showMessage('Lütfen eserine bir ad ver.', true); return; }
     submit.disabled = true;
-    submit.textContent = 'Yayımlanıyor…';
+    submit.textContent = isDraft ? 'Taslak kaydediliyor…' : 'Yayımlanıyor…';
     try {
       let coverPath = null;
       if (isChapteredKind(kind) && coverFile) {
@@ -1762,10 +1766,11 @@ function renderWrite() {
         critique_wanted: form.get('critique_wanted') === 'on',
         allow_download: form.get('allow_download') === 'on',
         allow_continuation: form.get('allow_continuation') === 'on',
+        is_draft: isDraft,
         theme_id: new URLSearchParams(location.hash.split('?')[1] || '').get('theme') || null
       };
       if (coverPath) postValues.cover_path = coverPath;
-      if (kind === 'manga' && !mangaPages.length && !chapterBody) {
+      if (kind === 'manga' && !isDraft && !mangaPages.length && !chapterBody) {
         showMessage('Manga için en az bir sayfa yükle, panel oluşturucuyla çiz ya da senaryo metni yaz.', true); return;
       }
       const { data: post, error } = await sb.from('posts').insert(postValues).select().single();
@@ -1827,7 +1832,7 @@ function renderWrite() {
       showMessage(err.message || 'Bir hata oluştu.', true);
     } finally {
       submit.disabled = false;
-      submit.textContent = 'Eseri yayımla';
+      submit.textContent = isDraft ? '📝 Taslak olarak kaydet' : 'Eseri yayımla';
     }
   });
 }
@@ -2182,6 +2187,7 @@ async function renderRead(id, query = '') {
 
   app.innerHTML = `
     <p><a href="#/">← Eserlere dön</a></p>
+    ${post.is_draft ? `<div style="background:var(--card,#181714);border:1px dashed var(--line);border-radius:12px;padding:10px 14px;margin-bottom:12px" class="small">📝 <strong>Taslak</strong> — bu eseri şu an yalnızca sen görüyorsun. Hazır olunca aşağıdan yayınla.</div>` : ''}
     <section class="hero">
       <div class="eyebrow">${esc(quickTypeLabel(post))}</div>
       <h1>${esc(post.title || 'Başlıksız eser')}</h1>
@@ -2228,6 +2234,7 @@ async function renderRead(id, query = '') {
       </button>
         ${currentUser ? `<a class="btn ghost small" href="#/chat?share=${encodeURIComponent(post.id)}">Sohbette paylaş</a>` : ''}
         ${currentUser ? '<button class="btn ghost small" id="collectionBtn" type="button">📚 Koleksiyona ekle</button>' : ''}
+        ${isOwner && post.is_draft ? '<button class="btn primary small" id="publishDraftBtn" type="button">📢 Taslağı yayınla</button>' : ''}
         ${isOwner ? '<button class="btn ghost small" id="newVersionBtn" type="button">📜 Yeni versiyon</button>' : ''}
         ${isOwner && (post.media_url || post.kind === 'manga') ? `<button class="btn ghost small" id="downloadToggleBtn" type="button" title="Eserin indirilip indirilemeyeceğini seç">⬇️ İndirme: ${post.allow_download ? 'açık' : 'kapalı'}</button>` : ''}
         ${isOwner && (!post.type || post.type === 'writing') ? `<button class="btn ghost small" id="contToggleBtn" type="button" title="Okurların devam önermesine izin ver/kes">✍️ Devam: ${post.allow_continuation ? 'açık' : 'kapalı'}</button>` : ''}
@@ -2537,6 +2544,12 @@ async function renderRead(id, query = '') {
     const { error } = await sb.from('posts').update({ allow_download: next }).eq('id', post.id).eq('author_id', currentUser.id);
     if (error) return showMessage('Ayar güncellenemedi: ' + error.message, true);
     showMessage(next ? 'İndirme açıldı — imzalı link üzerinden indirilebilir.' : 'İndirme kapatıldı.');
+    renderRead(post.id);
+  });
+  document.getElementById('publishDraftBtn')?.addEventListener('click', async () => {
+    const { error } = await sb.from('posts').update({ is_draft: false }).eq('id', post.id).eq('author_id', currentUser.id);
+    if (error) return showMessage('Yayınlanamadı: ' + error.message, true);
+    showMessage('Eser yayınlandı — artık herkes görebilir.');
     renderRead(post.id);
   });
   document.getElementById('contToggleBtn')?.addEventListener('click', async () => {
@@ -3028,6 +3041,7 @@ async function renderProfile(id) {
       <article class="card">
         <div class="meta">
           <span>${esc(quickTypeLabel(post))}</span>
+          ${post.is_draft ? '<span class="small">📝 Taslak</span>' : ''}
           <span>· ${esc(formatDate(post.created_at))}</span>
         </div>
         ${postCoverHTML(post)}
@@ -5649,7 +5663,7 @@ const MEDIA_CREATE = {
 const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 const VIDEO_EXT = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 
-async function publishMediaPost({ type, file, mime, title, tags, description, pen_name, critique_wanted, allow_download }) {
+async function publishMediaPost({ type, file, mime, title, tags, description, pen_name, critique_wanted, allow_download, is_draft }) {
   const cfg = MEDIA_CREATE[type];
   mime = String(mime || '').split(';')[0].trim();
   if (/^image\//.test(mime)) {
@@ -5664,7 +5678,8 @@ async function publishMediaPost({ type, file, mime, title, tags, description, pe
   const { data: post, error } = await sb.from('posts').insert({
     author_id: currentUser.id, title, description, tags,
     category: tags[0] || 'Diğer', type, kind: type, media_url: mediaUrl,
-    pen_name: pen_name || null, critique_wanted: !!critique_wanted, allow_download: !!allow_download
+    pen_name: pen_name || null, critique_wanted: !!critique_wanted, allow_download: !!allow_download,
+    is_draft: !!is_draft
   }).select().single();
   if (error) { await sb.storage.from('post-media').remove([path]); throw new Error('Eser oluşturulamadı: ' + error.message); }
   return post;
@@ -5761,7 +5776,10 @@ function renderCreateMedia(type, mode) {
             <span class="small" id="cameraStatus">Kamera izni istenecek.</span>
           </div>
         </div>` : ''}
-        <button class="btn primary" type="submit">${cfg.label} yayımla</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn primary" type="submit">${cfg.label} yayımla</button>
+          <button class="btn ghost" type="submit" id="draftBtn" title="Kimse görmeden kaydet — sonra yayınlarsın">📝 Taslak olarak kaydet</button>
+        </div>
       </form>
       <div id="message" class="message"></div>
     </section>`;
@@ -6078,10 +6096,11 @@ function renderCreateMedia(type, mode) {
     const title = String(form.get('title') || '').trim();
     const description = String(form.get('description') || '').trim();
     const tags = parseHashtags(form.get('tags'));
-    const submit = e.currentTarget.querySelector('button[type="submit"]');
+    const isDraft = e.submitter?.id === 'draftBtn';
+    const submit = e.submitter || e.currentTarget.querySelector('button[type="submit"]');
     if (!title) { showMessage('Lütfen eserine bir ad ver.', true); return; }
     submit.disabled = true;
-    submit.textContent = 'Yayımlanıyor…';
+    submit.textContent = isDraft ? 'Taslak kaydediliyor…' : 'Yayımlanıyor…';
     try {
       let file = null;
       let mime = null;
@@ -6101,7 +6120,8 @@ function renderCreateMedia(type, mode) {
       const post = await publishMediaPost({ type, file, mime, title, tags, description,
         pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
         critique_wanted: form.get('critique_wanted') === 'on',
-        allow_download: form.get('allow_download') === 'on' });
+        allow_download: form.get('allow_download') === 'on',
+        is_draft: isDraft });
       stopCameraStream();
       clearDraft();
       location.hash = '#/read/' + encodeURIComponent(post.id);
@@ -6109,7 +6129,7 @@ function renderCreateMedia(type, mode) {
       showMessage(err.message || 'Bir hata oluştu.', true);
     } finally {
       submit.disabled = false;
-      submit.textContent = `${cfg.label} yayımla`;
+      submit.textContent = isDraft ? '📝 Taslak olarak kaydet' : `${cfg.label} yayımla`;
     }
   });
 }
@@ -6187,7 +6207,10 @@ function renderCreateMusic(mode) {
           <input id="musicLink" name="link" type="url" required maxlength="500" placeholder="https://open.spotify.com/track/…">
           <div class="small">Spotify, YouTube / YouTube Music, SoundCloud bağlantısı veya doğrudan ses dosyası adresi.</div>
         </div>` : ''}
-        <button class="btn primary" type="submit">Parçayı yayımla</button>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn primary" type="submit">Parçayı yayımla</button>
+          <button class="btn ghost" type="submit" id="draftBtn" title="Kimse görmeden kaydet — sonra yayınlarsın">📝 Taslak olarak kaydet</button>
+        </div>
       </form>
       <div id="message" class="message"></div>
     </section>`;
@@ -6269,10 +6292,11 @@ function renderCreateMusic(mode) {
     const title = String(form.get('title') || '').trim();
     const description = String(form.get('description') || '').trim();
     const tags = parseHashtags(form.get('tags'));
-    const submit = e.currentTarget.querySelector('button[type="submit"]');
+    const isDraft = e.submitter?.id === 'draftBtn';
+    const submit = e.submitter || e.currentTarget.querySelector('button[type="submit"]');
     if (!title) { showMessage('Lütfen parçana bir ad ver.', true); return; }
     submit.disabled = true;
-    submit.textContent = 'Yayımlanıyor…';
+    submit.textContent = isDraft ? 'Taslak kaydediliyor…' : 'Yayımlanıyor…';
     try {
       let mediaUrl = '';
       if (modeKey === 'link') {
@@ -6311,6 +6335,7 @@ function renderCreateMusic(mode) {
         pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
         critique_wanted: form.get('critique_wanted') === 'on',
         allow_download: form.get('allow_download') === 'on',
+        is_draft: isDraft,
         ...(coverPath ? { cover_path: coverPath } : {})
       }).select().single();
       if (error) { showMessage('Parça oluşturulamadı: ' + error.message, true); return; }
@@ -6320,7 +6345,7 @@ function renderCreateMusic(mode) {
       showMessage(err.message || 'Bir hata oluştu.', true);
     } finally {
       submit.disabled = false;
-      submit.textContent = 'Parçayı yayımla';
+      submit.textContent = isDraft ? '📝 Taslak olarak kaydet' : 'Parçayı yayımla';
     }
   });
 }
