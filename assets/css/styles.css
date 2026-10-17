@@ -286,6 +286,9 @@ body.has-mini-player{padding-bottom:70px}
 .chapter-comments{margin-top:18px;border-top:1px dashed var(--line);padding-top:10px}
 .chapter-comments-toggle{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:4px 14px;font-size:.82rem;cursor:pointer;color:var(--muted)}
 .chapter-comments-toggle:hover{color:var(--text);border-color:var(--gold)}
+.ch-like{border:1px solid var(--line);background:var(--panel2);border-radius:999px;padding:4px 12px;font-size:.82rem;cursor:pointer;color:var(--muted);margin-right:6px}
+.ch-like:hover,.ch-like.liked{color:var(--red);border-color:var(--red)}
+.ch-like.liked{background:rgba(215,120,106,.15)}
 .chapter-comments-panel{margin-top:10px}
 .chapter-comments-list .comment{margin-bottom:8px}
 .chapter-comment-form{display:flex;flex-direction:column;gap:8px;margin-top:8px}
@@ -599,3 +602,24 @@ input[type="file"]{font-size:0}
 input[type="file"]::file-selector-button{font:inherit;font-family:'Fredoka',sans-serif;border:1px solid var(--line);border-radius:12px;background:var(--panel2);color:var(--text);padding:9px 16px;cursor:pointer;transition:.2s;margin-right:12px}
 input[type="file"]::file-selector-button:hover{border-color:var(--gold);transform:translateY(-1px)}
 .file-name{display:inline-block;margin-top:6px;font-size:13px;color:var(--muted)}
+
+/* Cift tik begeni kalp animasyonu */
+.dbl-like-heart{position:fixed;z-index:9999;font-size:44px;pointer-events:none;transform:translate(-50%,-50%);animation:heartPop .9s ease-out forwards}
+@keyframes heartPop{0%{transform:translate(-50%,-50%) scale(.4);opacity:0}20%{opacity:1;transform:translate(-50%,-50%) scale(1.15)}100%{transform:translate(-50%,-140%) scale(1);opacity:0}}
+
+/* Sohbet: sabitlenen mesajlar cubugu */
+.chat-pinned{display:flex;flex-direction:column;gap:4px;padding:8px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}
+.chat-pinned-msg{text-align:left;font:inherit;font-size:13px;color:var(--text);background:none;border:none;cursor:pointer;padding:4px 6px;border-radius:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-pinned-msg:hover{background:var(--card)}
+audio.chat-voice{width:100%;max-width:280px;margin:6px 0;height:36px}
+
+/* Ortak uretim odasi editoru */
+.collab-doc{width:100%;min-height:55vh;resize:vertical;font-family:'Courier New',monospace;font-size:15px;line-height:1.7;background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:16px}
+.invite-link-row{display:flex;gap:8px;align-items:center}
+.invite-link-row input{flex:1;min-width:0}
+
+/* Sprint sayaci */
+.sprint-overlay{position:fixed;inset:0;z-index:9000;background:rgba(10,9,6,.82);display:flex;align-items:center;justify-content:center;backdrop-filter:blur(4px)}
+.sprint-card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:32px 40px;text-align:center;max-width:340px}
+.sprint-time{font-size:56px;font-weight:700;font-variant-numeric:tabular-nums;margin:10px 0}
+.sprint-info{color:var(--muted);font-size:13px}

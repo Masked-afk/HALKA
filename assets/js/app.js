@@ -225,6 +225,14 @@ function initials(name) {
   const s = String(name || 'H').trim();
   return esc(s ? s[0].toLocaleUpperCase('tr-TR') : 'H');
 }
+function consumeAfterLogin() {
+  const target = sessionStorage.getItem('halkaAfterLogin');
+  if (!target || !target.startsWith('#/')) return false;
+  sessionStorage.removeItem('halkaAfterLogin');
+  location.hash = target;
+  return true;
+}
+
 function showMessage(text, error = false) {
   const el = document.getElementById('message');
   if (!el) return;
@@ -457,11 +465,18 @@ async function signedProfileImage(path) {
 function profileAvatar(profile, name, imageUrl = '') {
   return `<div class="avatar">${imageUrl ? `<img src="${esc(imageUrl)}" alt="${esc(name)} profil fotoğrafı">` : initials(name)}</div>`;
 }
-function presenceHTML(lastActive) {
-  if (!lastActive) return '';
+function presenceHTML(profile) {
+  const lastActive = typeof profile === 'object' && profile !== null ? profile.last_active_at : profile;
+  const nowDoing = typeof profile === 'object' && profile !== null ? profile.now_doing : null;
+  const nowDoingAt = typeof profile === 'object' && profile !== null ? profile.now_doing_at : null;
+  let doingLine = '';
+  if (nowDoing && nowDoingAt && Date.now() - new Date(nowDoingAt).getTime() < 15 * 60 * 1000) {
+    doingLine = `<div class="meta presence-doing">⚡ ${esc(nowDoing)}</div>`;
+  }
+  if (!lastActive) return doingLine;
   const diff = Date.now() - new Date(lastActive).getTime();
-  if (diff < 5 * 60 * 1000) return '<div class="meta presence"><span class="presence-dot on"></span>Çevrimiçi</div>';
-  return `<div class="meta presence"><span class="presence-dot"></span>Son görülme: ${esc(formatDate(lastActive))}</div>`;
+  if (diff < 5 * 60 * 1000) return `<div class="meta presence"><span class="presence-dot on"></span>Çevrimiçi</div>${doingLine}`;
+  return `<div class="meta presence"><span class="presence-dot"></span>Son görülme: ${esc(formatDate(lastActive))}</div>${doingLine}`;
 }
 
 function formatDate(value) {
@@ -1057,6 +1072,15 @@ async function loadFeed(append = false) {
   feed.querySelectorAll('.like-btn').forEach(btn => {
     btn.addEventListener('click', () => handleLike(btn));
   });
+  feed.querySelectorAll('article.card').forEach(card => {
+    card.addEventListener('dblclick', e => {
+      if (e.target.closest('button, a, input, textarea, select')) return;
+      const likeBtn = card.querySelector('.like-btn');
+      if (!likeBtn || likeBtn.classList.contains('liked')) return;
+      heartBurst(e.clientX, e.clientY);
+      likeBtn.click();
+    });
+  });
   document.getElementById('loadMoreBtn')?.addEventListener('click', () => {
     feedOffset += FEED_PAGE;
     loadFeed(true);
@@ -1597,14 +1621,14 @@ function renderAuth(mode = 'signup') {  currentAuthMode = mode;
         }
         currentUser = data.user;
         await loadProfile();
-        location.hash = '#/';
+        if (!consumeAfterLogin()) location.hash = '#/';
       } else {
         const { data, error } = await sb.auth.signInWithPassword({ email, password });
         if (error) { showMessage(error.message, true); return; }
         currentUser = data.user;
         await loadProfile();
         if (await requireMfaChallenge()) return;
-        location.hash = '#/';
+        if (!consumeAfterLogin()) location.hash = '#/';
       }
     } catch (err) {
       showMessage(err.message || 'Beklenmeyen bir hata oluştu.', true);
@@ -1657,7 +1681,7 @@ function renderAuth(mode = 'signup') {  currentAuthMode = mode;
     if (error) { phoneMessage('Doğrulama başarısız: ' + error.message, true); return; }
     currentUser = data.user;
     await loadProfile();
-    location.hash = '#/';
+    if (!consumeAfterLogin()) location.hash = '#/';
   });
 }
 
@@ -1673,6 +1697,7 @@ async function loadProfile() {
 
 function renderWrite() {
   if (!currentUser) { location.hash = '#/auth?signup'; return; }
+  setNowDoing('✍️ yeni bir eser yazıyor');
   app.innerHTML = `
     <section class="hero">
       <div class="eyebrow">Yaratıcılığa yer aç</div>
@@ -1707,6 +1732,14 @@ function renderWrite() {
           <label for="betaWanted" style="margin:0">🔬 Beta okuyucu istiyorum — gönüllü bir okur taslağı okuyup sana özel geri bildirim bırakır</label>
         </div>
         <div class="field">
+          <label for="audience">Kimler görebilir?</label>
+          <select id="audience" name="visibility">
+            <option value="public">🌍 Herkes</option>
+            <option value="friends">🔒 Sadece arkadaşlarım</option>
+          </select>
+          <div class="small">"Sadece arkadaşlarım" seçersen eser akışta ve aramada yalnızca karşılıklı arkadaşlarına görünür.</div>
+        </div>
+        <div class="field">
           <label for="tags">Hashtag’ler</label>
           <input id="tags" name="tags" maxlength="160" list="hashtagSuggestions" placeholder="fantastik, günlük, kitap">
           <datalist id="hashtagSuggestions">${categories.filter(tag => tag !== 'Diğer').map(tag => `<option value="${esc(tagSlug(tag))}">`).join('')}</datalist>
@@ -1738,6 +1771,7 @@ function renderWrite() {
         <h2 id="writingBodyHeading">Yazı içeriği</h2>
         <p id="writingTemplateHelp" class="small"></p>
         <button class="btn ghost small" id="insertWritingTemplate" type="button">Örnek iskeleti ekle</button>
+        <button class="btn ghost small" id="sprintBtn" type="button" style="margin-left:6px">⏱️ Sprint başlat</button>
         <div class="field" id="chapterTitleField">
           <label for="chapter_title">İçerik başlığı</label>
           <input id="chapter_title" name="chapter_title" maxlength="120" placeholder="Yazı">
@@ -1819,6 +1853,7 @@ function renderWrite() {
     document.getElementById('chapter_body').required = !isManga;
     document.getElementById('mangaPagesField').hidden = !isManga;
     document.getElementById('insertWritingTemplate').hidden = isManga;
+    document.getElementById('sprintBtn').hidden = isManga;
     document.querySelector('label[for="chapter_title"]').textContent = t.chapterLabel;
     document.getElementById('chapter_title').placeholder = t.chapterPlaceholder;
     document.querySelector('label[for="chapter_body"]').textContent = t.bodyLabel;
@@ -1886,6 +1921,7 @@ function renderWrite() {
     preview.classList.add('visible');
   });
   bindRichTextTools(document.getElementById('chapterTools'), document.getElementById('chapter_body'));
+  document.getElementById('sprintBtn').addEventListener('click', () => startWritingSprint(document.getElementById('chapter_body')));
   applyWritingTemplate(document.getElementById('kind').value);
   document.getElementById('tags').addEventListener('input', e => {
     const tags = parseHashtags(e.target.value);
@@ -1930,6 +1966,7 @@ function renderWrite() {
         allow_download: form.get('allow_download') === 'on',
         allow_continuation: form.get('allow_continuation') === 'on',
         beta_wanted: form.get('beta_wanted') === 'on',
+        visibility: form.get('visibility') === 'friends' ? 'friends' : 'public',
         is_draft: isDraft,
         theme_id: new URLSearchParams(location.hash.split('?')[1] || '').get('theme') || null
       };
@@ -2101,6 +2138,8 @@ async function renderRead(id, query = '') {
   }
   if (currentUser) {
     sb.from('view_history').upsert({ user_id: currentUser.id, post_id: id, viewed_at: new Date().toISOString() }).then(() => {});
+    const doingVerb = post.type === 'video' ? 'izliyor' : post.type === 'music' ? 'dinliyor' : post.type === 'drawing' || post.type === 'photo' ? 'inceliyor' : 'okuyor';
+    setNowDoing(`"${(post.title || 'Bir eser').slice(0, 60)}" ${doingVerb}`);
   }
 
   const { data: chapters, error: chapterError } = await sb.from('chapters').select('*').eq('post_id', id).order('position', { ascending: true });
@@ -2134,6 +2173,17 @@ async function renderRead(id, query = '') {
   }
   const myContinuation = continuations.find(c => currentUser && c.author_id === currentUser.id);
   const pendingConts = continuations.filter(c => c.status === 'pending');
+
+  // Bölüm beğenileri
+  const chapterIds = (chapters || []).map(c => c.id);
+  let chapterLikeCounts = {}, myChapterLikes = new Set();
+  if (chapterIds.length) {
+    const { data: cl } = await sb.from('chapter_likes').select('chapter_id,user_id').in('chapter_id', chapterIds);
+    (cl || []).forEach(l => {
+      chapterLikeCounts[l.chapter_id] = (chapterLikeCounts[l.chapter_id] || 0) + 1;
+      if (currentUser && l.user_id === currentUser.id) myChapterLikes.add(l.chapter_id);
+    });
+  }
 
   // Birlikte okuyalım kulüpleri (bölümlü eserlerde)
   let clubs = [], clubMemberCounts = {};
@@ -2385,6 +2435,7 @@ async function renderRead(id, query = '') {
         <span>${!post.type || post.type === 'writing' ? 'Yazar' : 'Paylaşan'}: ${post.pen_name ? `<span title="Kalem adı">✒️ ${esc(post.pen_name)}</span>` : `<a href="#/user/${encodeURIComponent(post.author_id)}">${esc(displayName(profile))}</a>`}</span>
         ${post.critique_wanted ? '<span class="critique-badge">🎯 Eleştiri bekliyor</span>' : ''}
         ${post.beta_wanted ? '<span class="critique-badge">🔬 Beta okur arıyor</span>' : ''}
+        ${post.visibility === 'friends' ? '<span class="chip small" title="Yalnızca yazarın karşılıklı arkadaşları görebilir">🔒 Arkadaşlara özel</span>' : ''}
         ${myBetaMatch && !isOwner ? '<span class="chip small">🔬 Beta okurusun</span>' : ''}
         <span>· ${esc(formatDate(post.created_at))}</span>
         <span>· ${Number(post.view_count || 0)} görüntülenme</span>
@@ -2478,8 +2529,9 @@ async function renderRead(id, query = '') {
       const chComments = commentsByChapter.get(ch.id) || [];
       return `
       <section class="chapter" id="chapter-${i}" data-chapter-index="${i}">
-        <h3>${esc(ch.title || 'Bölüm')}</h3>
+        <h3>${esc(ch.title || 'Bölüm')} ${ch.is_draft ? '<span class="chip small" title="Yalnızca sen görüyorsun">📝 Taslak</span>' : ''}</h3>
         ${isOwner && isChapteredKind(post.kind) ? `<div class="page-admin" style="display:flex;gap:6px;margin:4px 0 8px">
+          ${ch.is_draft ? `<button class="btn primary small ch-publish" data-ch="${esc(ch.id)}" type="button" title="Bölümü okurlara aç">📢 Yayınla</button>` : ''}
           <button class="btn ghost small ch-move" data-ch="${esc(ch.id)}" data-dir="-1" type="button" title="Yukarı taşı" ${i === 0 ? 'disabled' : ''}>↑</button>
           <button class="btn ghost small ch-move" data-ch="${esc(ch.id)}" data-dir="1" type="button" title="Aşağı taşı" ${i === (chapters || []).length - 1 ? 'disabled' : ''}>↓</button>
           <button class="btn ghost small ch-del" data-ch="${esc(ch.id)}" data-title="${esc(ch.title || 'Sayfa')}" type="button" title="Sil">🗑</button>
@@ -2487,6 +2539,7 @@ async function renderRead(id, query = '') {
         ${ch.media_url ? `<img class="manga-page-img" src="${esc(ch.media_url)}" alt="${esc(ch.title || 'Manga sayfası')}" loading="lazy"${post.allow_download ? '' : ' oncontextmenu="return false" draggable="false"'}>` : ''}
         ${ch.body ? `<div class="chapter-body">${renderParagraphs(ch.body, ch.id, paragraphCounts[ch.id] || {}, post.kind)}</div>` : ''}
         <div class="chapter-comments">
+          <button class="ch-like ${myChapterLikes.has(ch.id) ? 'liked' : ''}" data-ch="${esc(ch.id)}" type="button" title="Bu bölümü beğen">${myChapterLikes.has(ch.id) ? '❤️' : '🤍'} <span>${chapterLikeCounts[ch.id] || 0}</span></button>
           <button class="chapter-comments-toggle" data-chapter="${esc(ch.id)}" type="button">💬 Bölüm yorumları (<span>${chComments.length}</span>)</button>
           <div class="chapter-comments-panel" hidden>
             <div class="chapter-comments-list">${chComments.length ? chComments.map(c => renderComment(c)).join('') : '<div class="empty small">Bu bölüme henüz yorum yok.</div>'}</div>
@@ -2594,6 +2647,10 @@ async function renderRead(id, query = '') {
             <input id="cIllustration" name="illustration" type="file" accept="image/jpeg,image/png,image/webp">
             <div class="small">Bölüm sonrasına görsel sayfa olarak eklenir — light novel geleneği.</div>
           </div>` : ''}`}
+          <div class="field" style="display:flex;align-items:center;gap:8px">
+            <input id="chapterDraft" name="chapter_draft" type="checkbox" style="width:auto">
+            <label for="chapterDraft" style="margin:0">📝 Taslak bölüm — sadece sen görürsün, hazır olunca yayınlarsın</label>
+          </div>
           <button class="btn primary" type="submit">${post.kind === 'manga' ? 'Sayfaları ekle' : 'Bölümü ekle'}</button>
           <div id="message" class="message"></div>
         </form>
@@ -2611,6 +2668,18 @@ async function renderRead(id, query = '') {
       </section>` : ''}
       <p><button class="btn danger" id="deleteBtn" type="button">Eseri sil</button></p>` : ''}
   `;
+
+  // Medya "kaldığın yerden" — konum kaydet/geri yükle
+  initPlaybackMemory(post.id);
+
+  // Çift tık/çift dokunuş ile beğenme — medya veya başlık bölgesi
+  const dblZone = app.querySelector('.hero') || app;
+  dblZone.addEventListener('dblclick', e => {
+    if (!currentUser || userLiked) return;
+    if (e.target.closest('button, a, input, textarea, select')) return;
+    heartBurst(e.clientX, e.clientY);
+    document.getElementById('readLikeBtn')?.click();
+  });
 
   document.getElementById('collectionBtn')?.addEventListener('click', () => openCollectionPicker(post.id));
   document.getElementById('adminFlagPost')?.addEventListener('click', e => adminFlagContent('post', post.id, e.currentTarget));
@@ -3025,6 +3094,7 @@ async function renderRead(id, query = '') {
   document.getElementById('chapterForm')?.addEventListener('submit', async e => {
     e.preventDefault();
     const form = new FormData(e.target);
+    const chDraft = form.get('chapter_draft') === 'on';
     const last = (chapters || []).reduce((m, c) => Math.max(m, c.position || 0), 0);
     if (post.kind === 'manga') {
       const note = String(form.get('cbody') || '').trim();
@@ -3038,11 +3108,11 @@ async function renderRead(id, query = '') {
         if (up.error) { btn.disabled = false; return showMessage(`Sayfa yüklenemedi: ` + up.error.message, true); }
         const mediaUrl = sb.storage.from('post-media').getPublicUrl(path).data.publicUrl;
         const { error: cErr } = await sb.from('chapters').insert({
-          post_id: post.id, position: last + 1 + i, title: `Sayfa ${last + 1 + i}`, body: '', media_url: mediaUrl
+          post_id: post.id, position: last + 1 + i, title: `Sayfa ${last + 1 + i}`, body: '', media_url: mediaUrl, is_draft: chDraft
         });
         if (cErr) { btn.disabled = false; return showMessage('Sayfa kaydedilemedi: ' + cErr.message, true); }
       }
-      if (note) await sb.from('chapters').insert({ post_id: post.id, position: last + 1 + pendingPages.length, title: 'Senaryo', body: note });
+      if (note) await sb.from('chapters').insert({ post_id: post.id, position: last + 1 + pendingPages.length, title: 'Senaryo', body: note, is_draft: chDraft });
       renderRead(id);
       return;
     }
@@ -3054,7 +3124,7 @@ async function renderRead(id, query = '') {
       const { error: insertError } = await sb.from('chapters').insert({
         post_id: post.id, position: nextPos++,
         title: String(form.get('ctitle') || '').trim(),
-        body
+        body, is_draft: chDraft
       });
       if (insertError) return showMessage('Bölüm eklenemedi: ' + insertError.message, true);
     }
@@ -3068,7 +3138,7 @@ async function renderRead(id, query = '') {
       const { error: illErr } = await sb.from('chapters').insert({
         post_id: post.id, position: nextPos,
         title: String(form.get('ctitle') || '').trim() || 'İllüstrasyon',
-        body: '', media_url: mediaUrl
+        body: '', media_url: mediaUrl, is_draft: chDraft
       });
       if (illErr) return showMessage('İllüstrasyon kaydedilemedi: ' + illErr.message, true);
     }
@@ -3098,6 +3168,32 @@ async function renderRead(id, query = '') {
     const m = ch?.media_url?.match(/\/post-media\/([^?]+)/);
     if (m) await sb.storage.from('post-media').remove([decodeURIComponent(m[1])]);
     renderRead(id);
+  }));
+  app.querySelectorAll('.ch-publish').forEach(btn => btn.addEventListener('click', async () => {
+    const { error } = await sb.from('chapters').update({ is_draft: false }).eq('id', btn.dataset.ch);
+    if (error) return showMessage('Bölüm yayınlanamadı: ' + error.message, true);
+    showMessage('Bölüm yayınlandı — artık herkes görebilir.');
+    renderRead(id);
+  }));
+  app.querySelectorAll('.ch-like').forEach(btn => btn.addEventListener('click', async () => {
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    const chId = btn.dataset.ch;
+    const liked = myChapterLikes.has(chId);
+    btn.disabled = true;
+    const { error } = liked
+      ? await sb.from('chapter_likes').delete().eq('chapter_id', chId).eq('user_id', currentUser.id)
+      : await sb.from('chapter_likes').insert({ chapter_id: chId, user_id: currentUser.id });
+    btn.disabled = false;
+    if (error) return alert('Beğeni kaydedilemedi: ' + error.message);
+    if (liked) {
+      myChapterLikes.delete(chId);
+      chapterLikeCounts[chId] = Math.max(0, (chapterLikeCounts[chId] || 1) - 1);
+    } else {
+      myChapterLikes.add(chId);
+      chapterLikeCounts[chId] = (chapterLikeCounts[chId] || 0) + 1;
+    }
+    btn.classList.toggle('liked', !liked);
+    btn.innerHTML = `${liked ? '🤍' : '❤️'} <span>${chapterLikeCounts[chId]}</span>`;
   }));
 
   // Manga okuma modu: dikey akış / tek sayfa / sağdan sola
@@ -3341,7 +3437,7 @@ async function renderProfile(id) {
       <div>
         <h1>${esc(name)}</h1>
         <div class="meta">@${esc(profile.username || '')}</div>
-        ${presenceHTML(profile.last_active_at)}
+        ${presenceHTML(profile)}
         ${profile.featured_badge ? `<div class="featured-badge" title="Öne çıkan rozet">${esc(resolveBadge(profile.featured_badge, specialBadges).icon || '✦')} ${esc(resolveBadge(profile.featured_badge, specialBadges).name)}</div>` : ''}
       </div>
     </section>
@@ -3416,6 +3512,7 @@ async function renderProfile(id) {
         <div class="meta">
           <span>${esc(quickTypeLabel(post))}</span>
           ${post.is_draft ? '<span class="small">📝 Taslak</span>' : ''}
+          ${post.visibility === 'friends' ? '<span class="small" title="Sadece arkadaşlar görür">🔒</span>' : ''}
           <span>· ${esc(formatDate(post.created_at))}</span>
         </div>
         ${postCoverHTML(post)}
@@ -4676,8 +4773,10 @@ async function renderChat(conversationId, query = '') {
         ${activeConversation ? `
           <div class="chat-heading">
             <div style="flex:1;min-width:0"><h2>${esc(activeConversation.custom_title || conversationTitle(activeConversation))}</h2><div class="small" id="chatHeadingMeta">${activeConversation.is_group ? 'Grup sohbeti' : 'Bire bir sohbet'}</div></div>
+            <input id="chatSearch" type="search" placeholder="Mesajlarda ara…" aria-label="Sohbette ara" style="max-width:150px">
             <button class="btn ghost small" id="chatCustomizeBtn" type="button" aria-label="Sohbeti özelleştir">Özelleştir</button>
           </div>
+          <div id="chatPinned" class="chat-pinned" hidden></div>
           <div id="chatCustomizePanel" hidden>
             <form id="chatCustomizeForm" class="chat-compose" style="border-bottom:1px solid var(--line);padding:10px 14px">
               <div class="field" style="flex:1;margin:0"><label for="chatCustomTitle">Sohbet başlığı</label><input id="chatCustomTitle" name="custom_title" maxlength="80" value="${esc(activeConversation.custom_title || '')}" placeholder="Örn. Okuma grubu"></div>
@@ -4690,7 +4789,7 @@ async function renderChat(conversationId, query = '') {
           ${sharedPost ? `<div id="chatSharePreview" class="chat-share-preview"><div class="small">Bu eser mesajına eklenecek:</div>${chatPostPreview(sharedPost)}</div>` : '<div id="chatSharePreview" class="chat-share-preview"></div>'}
           <form id="chatComposeForm" class="chat-compose">
             <textarea id="chatMessageBody" maxlength="4000" aria-label="Mesajın" placeholder="Mesajını yaz…"></textarea>
-            <div class="chat-attachment-picker"><label class="btn ghost small" for="chatAttachment">Fotoğraf, video veya PDF ekle</label><input id="chatAttachment" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,application/pdf" hidden><span id="chatAttachmentName" class="small">En fazla 25 MB</span></div>
+            <div class="chat-attachment-picker"><label class="btn ghost small" for="chatAttachment">Fotoğraf, video veya PDF ekle</label><input id="chatAttachment" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,application/pdf" hidden><button class="btn ghost small" id="chatVoiceBtn" type="button" title="Sesli mesaj kaydet">🎙️</button><span id="chatAttachmentName" class="small">En fazla 25 MB</span></div>
             <button class="btn primary" type="submit">${sharedPost ? 'Eseri gönder' : 'Gönder'}</button>
           </form>
           <div id="chatSendMessage" class="message" style="padding:0 14px 8px" aria-live="polite"></div>
@@ -4777,8 +4876,12 @@ async function renderChat(conversationId, query = '') {
     if (!document.getElementById('chatMessages') || !location.hash.includes(encodeURIComponent(activeId))) return;
     const box = document.getElementById('chatMessages');
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 100;
-    let result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at,delivered_at,read_at,edited_at,deleted_at')
+    let result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at,delivered_at,read_at,edited_at,deleted_at,pinned_by')
       .eq('conversation_id', activeId).order('created_at', { ascending: true }).limit(150);
+    if (result.error && /pinned_by/i.test(result.error.message || '')) {
+      result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at,delivered_at,read_at,edited_at,deleted_at')
+        .eq('conversation_id', activeId).order('created_at', { ascending: true }).limit(150);
+    }
     if (result.error && /delivered_at|read_at|edited_at|deleted_at|schema cache|does not exist/i.test(result.error.message || '')) {
       result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at')
         .eq('conversation_id', activeId).order('created_at', { ascending: true }).limit(150);
@@ -4812,7 +4915,15 @@ async function renderChat(conversationId, query = '') {
         `<button class="react-chip ${info.mine ? 'mine' : ''}" data-msg="${mid}" data-emoji="${emoji}" type="button">${emoji} ${info.count}</button>`).join('') : '';
       return `<div class="react-row">${chips}<button class="react-add" data-msg="${mid}" type="button" title="Tepki ekle">＋</button></div>`;
     };
-    box.innerHTML = rows.length ? rows.map(row => row.deleted_at ? `
+    const pinnedRows = rows.filter(r => r.pinned_by && !r.deleted_at);
+    const pinnedBar = document.getElementById('chatPinned');
+    if (pinnedBar) {
+      pinnedBar.innerHTML = pinnedRows.map(r => `<button class="chat-pinned-msg" type="button" data-jump="${esc(r.id)}">📌 <strong>${esc(displayName(senders[r.sender_id], 'Halka kullanıcısı'))}:</strong> ${esc((r.body || (r.shared_post_id ? 'Bir eser paylaştı' : r.attachment_name || 'Dosya')).slice(0, 120))}</button>`).join('');
+      pinnedBar.hidden = !pinnedRows.length;
+    }
+    const chatFilter = (document.getElementById('chatSearch')?.value || '').trim().toLocaleLowerCase('tr');
+    const visibleRows = chatFilter ? rows.filter(r => (r.body || '').toLocaleLowerCase('tr').includes(chatFilter)) : rows;
+    box.innerHTML = visibleRows.length ? visibleRows.map(row => row.deleted_at ? `
       <article class="chat-message deleted ${row.sender_id === currentUser.id ? 'mine' : ''}">
         <div class="chat-message-body small">Bu mesaj silindi.</div>
       </article>` : `
@@ -4825,11 +4936,12 @@ async function renderChat(conversationId, query = '') {
         <div class="chat-meta">
           ${esc(new Date(row.created_at).toLocaleString('tr-TR', { dateStyle:'short', timeStyle:'short' }))}
           ${row.edited_at ? '<span class="small">(düzenlendi)</span>' : ''}
+          <button class="chat-msg-act" data-act="pin" data-msg="${row.id}" data-pinned="${row.pinned_by ? '1' : ''}" type="button" title="${row.pinned_by ? 'Sabitlemeyi kaldır' : 'Sohbete sabitle'}">${row.pinned_by ? '📌' : '📍'}</button>
           ${row.sender_id === currentUser.id ? `<span class="chat-receipts" title="${row.read_at ? 'Okundu' : row.delivered_at ? 'Ulaştı' : 'Gönderildi'}">${row.read_at ? '✓✓' : row.delivered_at ? '✓' : '∙'}</span>
             <button class="chat-msg-act" data-act="edit" data-msg="${row.id}" type="button" title="Düzenle">✎</button>
             <button class="chat-msg-act" data-act="del" data-msg="${row.id}" type="button" title="Sil">🗑</button>` : ''}
         </div>
-      </article>`).join('') : '<div class="empty">Henüz mesaj yok. İlk mesajı sen gönder.</div>';
+      </article>`).join('') : `<div class="empty">${chatFilter ? 'Bu aramayla eşleşen mesaj yok.' : 'Henüz mesaj yok. İlk mesajı sen gönder.'}</div>`;
     if (scrollIfNearBottom || nearBottom) box.scrollTop = box.scrollHeight;
     markRead();
   };
@@ -4863,6 +4975,11 @@ async function renderChat(conversationId, query = '') {
     }
     if (act) {
       const msgId = act.dataset.msg;
+      if (act.dataset.act === 'pin') {
+        await sb.from('messages').update({ pinned_by: act.dataset.pinned ? null : currentUser.id }).eq('id', msgId);
+        await loadMessages(false);
+        return;
+      }
       if (act.dataset.act === 'del') {
         if (!confirm('Bu mesajı silmek istiyor musun?')) return;
         await sb.from('messages').update({ deleted_at: new Date().toISOString() }).eq('id', msgId);
@@ -4932,6 +5049,50 @@ async function renderChat(conversationId, query = '') {
     const file = event.currentTarget.files?.[0];
     document.getElementById('chatAttachmentName').textContent = file ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(1)} MB` : 'En fazla 25 MB';
   });
+  document.getElementById('chatSearch')?.addEventListener('input', () => loadMessages(false));
+  document.getElementById('chatPinned')?.addEventListener('click', e => {
+    const btn = e.target.closest('[data-jump]');
+    if (!btn) return;
+    document.querySelector(`#chatMessages [data-msg-id="${CSS.escape(btn.dataset.jump)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  let voiceRecorder = null;
+  document.getElementById('chatVoiceBtn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('chatVoiceBtn');
+    const status = document.getElementById('chatSendMessage');
+    if (voiceRecorder) { voiceRecorder.stop(); return; }
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setSettingsMessage(status, 'Tarayıcın sesli mesajı desteklemiyor.', true); return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const chunks = [];
+      voiceRecorder = new MediaRecorder(stream);
+      voiceRecorder.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
+      const recordedMime = voiceRecorder.mimeType || 'audio/webm';
+      voiceRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        voiceRecorder = null;
+        btn.textContent = '🎙️';
+        if (!chunks.length) return;
+        const blob = new Blob(chunks, { type: recordedMime });
+        if (blob.size > 25 * 1024 * 1024) { setSettingsMessage(status, 'Ses kaydı çok uzun (25 MB sınırı).', true); return; }
+        setSettingsMessage(status, 'Sesli mesaj gönderiliyor…');
+        const ext = (blob.type.match(/\/(webm|ogg|mp4|mpeg|wav)/)?.[1]) || 'webm';
+        const path = `${activeId}/${currentUser.id}/${crypto.randomUUID()}-sesli.${ext}`;
+        const up = await sb.storage.from('chat-media').upload(path, blob, { contentType: blob.type });
+        if (up.error) { setSettingsMessage(status, `Sesli mesaj yüklenemedi: ${up.error.message}`, true); return; }
+        const { error } = await sb.from('messages').insert({ conversation_id: activeId, sender_id: currentUser.id, body: '🎙️ Sesli mesaj', attachment_path: path, attachment_mime: blob.type, attachment_name: 'Sesli mesaj', delivered_at: new Date().toISOString() });
+        if (error) { await sb.storage.from('chat-media').remove([path]); setSettingsMessage(status, `Gönderilemedi: ${error.message}`, true); return; }
+        setSettingsMessage(status, '');
+        await loadMessages(true);
+      };
+      voiceRecorder.start();
+      btn.textContent = '⏹️';
+      setSettingsMessage(status, 'Kaydediliyor… bitirmek için ⏹️ bas.');
+    } catch (err) {
+      setSettingsMessage(status, `Mikrofona erişilemedi: ${err.message || err}`, true);
+    }
+  });
   await loadMessages(true);
   if (chatChannel) { sb.removeChannel(chatChannel); chatChannel = null; }
   const typingEl = document.createElement('div');
@@ -4963,7 +5124,8 @@ function chatAttachmentHTML(row, url) {
   const name = esc(row.attachment_name || 'Paylaşılan dosya');
   if (mime.startsWith('image/')) return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer"><img class="chat-attachment-preview" src="${esc(url)}" alt="${name}" loading="lazy"></a>`;
   if (mime.startsWith('video/')) return `<video class="chat-attachment-preview" src="${esc(url)}" controls preload="metadata"></video>`;
-  return `<a class="chat-attachment-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">PDF dosyasını aç: ${name}</a>`;
+  if (mime.startsWith('audio/')) return `<audio class="chat-voice" src="${esc(url)}" controls preload="metadata"></audio>`;
+  return `<a class="chat-attachment-link" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Dosyayı aç: ${name}</a>`;
 }
 
 function chatPostPreview(post) {
@@ -6081,6 +6243,8 @@ async function openRandom() {
 
 function renderCreate(type, mode) {
   if (!currentUser) { location.hash = '#/auth?signup'; return; }
+  const doingLabel = { music: '🎵 bir parça üzerinde çalışıyor', drawing: '🎨 tuvalde çiziyor', photo: '📷 bir kare hazırlıyor', video: '🎬 bir video kurguluyor' }[type];
+  if (doingLabel) setNowDoing(doingLabel);
   if (type === 'music') return renderCreateMusic(mode || 'file');
   if (['drawing', 'photo', 'video'].includes(type)) return renderCreateMedia(type, mode);
   location.hash = '#/';
@@ -6102,7 +6266,7 @@ const MEDIA_CREATE = {
 const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 const VIDEO_EXT = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 
-async function publishMediaPost({ type, file, mime, title, tags, description, pen_name, critique_wanted, allow_download, is_draft }) {
+async function publishMediaPost({ type, file, mime, title, tags, description, pen_name, critique_wanted, allow_download, is_draft, visibility }) {
   const cfg = MEDIA_CREATE[type];
   mime = String(mime || '').split(';')[0].trim();
   if (/^image\//.test(mime)) {
@@ -6118,7 +6282,7 @@ async function publishMediaPost({ type, file, mime, title, tags, description, pe
     author_id: currentUser.id, title, description, tags,
     category: tags[0] || 'Diğer', type, kind: type, media_url: mediaUrl,
     pen_name: pen_name || null, critique_wanted: !!critique_wanted, allow_download: !!allow_download,
-    is_draft: !!is_draft
+    is_draft: !!is_draft, visibility: visibility === 'friends' ? 'friends' : 'public'
   }).select().single();
   if (error) { await sb.storage.from('post-media').remove([path]); throw new Error('Eser oluşturulamadı: ' + error.message); }
   return post;
@@ -6130,6 +6294,7 @@ function mediaPostFormHTML(idPrefix) {
     <div class="field"><label for="${idPrefix}PenName">Kalem adı <span class="small">(isteğe bağlı)</span></label><input id="${idPrefix}PenName" name="pen_name" maxlength="60" placeholder="Boş bırakırsan profil adın görünür"><div class="small">Bu eserde profil adın yerine bu isim gösterilir.</div></div>
     <div class="field" style="display:flex;align-items:center;gap:8px"><input id="${idPrefix}Critique" name="critique_wanted" type="checkbox" style="width:auto"><label for="${idPrefix}Critique" style="margin:0">🎯 Bu esere eleştiri istiyorum</label></div>
     <div class="field" style="display:flex;align-items:center;gap:8px"><input id="${idPrefix}Download" name="allow_download" type="checkbox" style="width:auto"><label for="${idPrefix}Download" style="margin:0">⬇️ Bu eserin indirilmesine izin ver</label></div>
+    <div class="field"><label for="${idPrefix}Audience">Kimler görebilir?</label><select id="${idPrefix}Audience" name="visibility"><option value="public">🌍 Herkes</option><option value="friends">🔒 Sadece arkadaşlarım</option></select></div>
     <div class="field"><label for="${idPrefix}Tags">Hashtag'ler</label><input id="${idPrefix}Tags" name="tags" maxlength="160" placeholder="çizim, portre"><div class="small">Virgül veya boşlukla ayır; en fazla 5 hashtag.</div><div id="${idPrefix}TagPreview" class="post-tags" aria-live="polite"></div></div>
     <div class="field"><label for="${idPrefix}Desc">Kısa tanıtım</label><textarea id="${idPrefix}Desc" name="description" maxlength="1200" placeholder="Eserin hakkında birkaç cümle…"></textarea></div>`;
 }
@@ -6560,6 +6725,7 @@ function renderCreateMedia(type, mode) {
         pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
         critique_wanted: form.get('critique_wanted') === 'on',
         allow_download: form.get('allow_download') === 'on',
+        visibility: form.get('visibility'),
         is_draft: isDraft });
       stopCameraStream();
       clearDraft();
@@ -6774,6 +6940,7 @@ function renderCreateMusic(mode) {
         pen_name: String(form.get('pen_name') || '').trim().slice(0, 60) || null,
         critique_wanted: form.get('critique_wanted') === 'on',
         allow_download: form.get('allow_download') === 'on',
+        visibility: form.get('visibility') === 'friends' ? 'friends' : 'public',
         is_draft: isDraft,
         ...(coverPath ? { cover_path: coverPath } : {})
       }).select().single();
@@ -6976,7 +7143,7 @@ async function renderCommunity(id, query = '') {
   let channelMessages = [];
   if (me) {
     const { data: ch } = await sb.from('community_channels').select('*').eq('community_id', id).order('position').order('created_at');
-    channels = ch || [];
+    channels = (ch || []).map(c => ({ ...c, min_write_role: c.min_write_role || 'member' }));
     const wantChannel = new URLSearchParams(query).get('kanal');
     activeChannel = channels.find(c => c.id === wantChannel) || channels[0] || null;
     if (activeChannel) {
@@ -7056,6 +7223,13 @@ async function renderCommunity(id, query = '') {
     const { data: ips } = await sb.from('profiles').select('id,username,display_name').in('id', interviewUserIds);
     interviewProfiles = Object.fromEntries((ips || []).map(p => [p.id, p]));
   }
+  // Yönetici davet linki
+  let inviteLink = null;
+  if (isAdmin) {
+    const { data: linkRow } = await sb.from('community_invite_links').select('code').eq('community_id', id).maybeSingle();
+    inviteLink = linkRow?.code || null;
+  }
+
   const jamListHTML = () => jamItems.length ? jamItems.map(it => {
     const p = jamPostMap[it.post_id];
     const canDel = it.added_by === currentUser?.id || isAdmin;
@@ -7107,7 +7281,7 @@ async function renderCommunity(id, query = '') {
     <section class="card">
       <div class="section-head"><h2>Kanallar</h2>${isAdmin ? '<button class="btn ghost small" id="channelAddBtn" type="button">+ Kanal</button>' : ''}</div>
       <div class="channel-tabs">${channels.map(c => `
-        <a class="channel-tab ${c.id === activeChannel?.id ? 'on' : ''}" href="#/topluluk/${encodeURIComponent(id)}?${channelQuery(c.id)}">#${esc(c.name)}${isAdmin ? `<span class="channel-del" data-channel="${esc(c.id)}" title="Kanalı sil">✕</span>` : ''}</a>`).join('')}</div>
+        <a class="channel-tab ${c.id === activeChannel?.id ? 'on' : ''}" href="#/topluluk/${encodeURIComponent(id)}?${channelQuery(c.id)}">${c.min_write_role === 'admin' ? '📢' : '#'}${esc(c.name)}${isAdmin ? `<span class="channel-del" data-channel="${esc(c.id)}" title="Kanalı sil">✕</span>` : ''}</a>`).join('')}</div>
       ${pinnedMessages.length ? `<div class="channel-pinned">${pinnedMessages.map(m => `<div class="channel-pinned-msg">📌 <strong>${esc(displayName(profileMap[m.sender_id], 'Üye'))}:</strong> ${esc(m.body.slice(0, 140))}${m.body.length > 140 ? '…' : ''}</div>`).join('')}</div>` : ''}
       <div id="channelMessages" class="channel-messages">${channelMessages.length ? channelMessages.map(m => `
         <div class="channel-msg ${m.sender_id === currentUser.id ? 'mine' : ''}">
@@ -7117,10 +7291,12 @@ async function renderCommunity(id, query = '') {
           ${isAdmin ? `<button class="chat-msg-act channel-pin" data-msg="${esc(m.id)}" data-pinned="${m.pinned_by ? '1' : ''}" type="button" title="${m.pinned_by ? 'Sabitlemeyi kaldır' : 'Sabitle'}">📌</button>` : ''}
           ${m.sender_id === currentUser.id || isAdmin ? `<button class="chat-msg-act channel-msg-del" data-msg="${esc(m.id)}" type="button" title="Sil">🗑</button>` : ''}
         </div>`).join('') : '<div class="empty">Bu kanalda henüz mesaj yok.</div>'}</div>
-      <form id="channelComposeForm" class="channel-compose">
+      ${activeChannel?.min_write_role === 'admin' && !isAdmin
+        ? '<div class="small" style="padding:8px 14px">📢 Bu bir duyuru kanalı — yalnızca yöneticiler yazabilir.</div>'
+        : `<form id="channelComposeForm" class="channel-compose">
         <input id="channelMessageBody" maxlength="1000" placeholder="#${esc(activeChannel?.name || '')} kanalına yaz…" autocomplete="off">
         <button class="btn primary" type="submit">Gönder</button>
-      </form>
+      </form>`}
       <div id="channelSendMessage" class="message" aria-live="polite"></div>
     </section>` : ''}
     <section class="card">
@@ -7230,6 +7406,15 @@ async function renderCommunity(id, query = '') {
         </div>
         <button class="btn" type="submit">Davet gönder</button>
       </form>
+      ${inviteLink ? `<hr>
+      <div class="field"><label>🔗 Davet linki</label>
+        <div class="invite-link-row">
+          <input id="inviteLinkInput" readonly value="${esc(`${location.origin}${location.pathname}#/davet/${inviteLink}`)}" onclick="this.select()">
+          <button class="btn ghost small" id="inviteCopyBtn" type="button">Kopyala</button>
+          <button class="btn ghost small" id="inviteRotateBtn" type="button" title="Eski linki geçersiz kılar">Yenile</button>
+        </div>
+        <div class="small">Bu linke sahip olan herkes doğrudan üye olur — katılım politikasını atlar. Sıkı kontrol istiyorsan kodu sadece güvendiğin kişilerle paylaş; sızarsa "Yenile" ile eskisini geçersiz kıl.</div>
+      </div>` : ''}
       <div id="message" class="message"></div>
       ${isCreator ? '<hr><p><button class="btn danger" id="communityDeleteBtn" type="button">Topluluğu sil</button></p>' : ''}
     </section>` : ''}`;
@@ -7452,6 +7637,17 @@ async function renderCommunity(id, query = '') {
     showMessage(rpcError ? 'Davet gönderilemedi: ' + rpcError.message : `Davet gönderildi: @${username}`, !!rpcError);
     if (!rpcError) inviteForm.reset();
   });
+  document.getElementById('inviteCopyBtn')?.addEventListener('click', async () => {
+    const input = document.getElementById('inviteLinkInput');
+    try { await navigator.clipboard.writeText(input.value); showMessage('Davet linki kopyalandı 🔗'); }
+    catch { input.select(); document.execCommand('copy'); showMessage('Davet linki kopyalandı 🔗'); }
+  });
+  document.getElementById('inviteRotateBtn')?.addEventListener('click', async () => {
+    if (!confirm('Davet linki yenilenecek — eski link artık çalışmayacak. Emin misin?')) return;
+    const { error } = await sb.rpc('rotate_invite_code', { p_community: id });
+    if (error) { alert('Link yenilenemedi: ' + error.message); return; }
+    renderCommunity(id, query);
+  });
   document.getElementById('communityDeleteBtn')?.addEventListener('click', async () => {
     if (!confirm('Topluluk kalıcı olarak silinecek. Emin misin?')) return;
     if (prompt('Silmek için SİL yaz:') !== 'SİL') return;
@@ -7501,7 +7697,8 @@ async function renderCommunity(id, query = '') {
       if (!name) return;
       const cleaned = name.trim().replace(/\s+/g, '-').slice(0, 40);
       if (!cleaned) return;
-      const { error: chErr } = await sb.from('community_channels').insert({ community_id: id, name: cleaned, position: channels.length });
+      const announce = confirm('Duyuru kanalı olsun mu? (Tamam = sadece yöneticiler yazar, İptal = herkes yazar)');
+      const { error: chErr } = await sb.from('community_channels').insert({ community_id: id, name: cleaned, position: channels.length, min_write_role: announce ? 'admin' : 'member' });
       if (chErr) { alert('Kanal oluşturulamadı: ' + chErr.message); return; }
       renderCommunity(id, query);
     });
@@ -8080,6 +8277,177 @@ async function renderClub(id) {
   });
 }
 
+async function renderInviteJoin(code) {
+  if (!currentUser) {
+    sessionStorage.setItem('halkaAfterLogin', `#/davet/${encodeURIComponent(code)}`);
+    app.innerHTML = `<div class="empty">Davete katılmak için önce giriş yapmalısın.<br><br><a class="btn primary" href="#/auth?login">Giriş yap</a></div>`;
+    return;
+  }
+  app.innerHTML = loadingBlock('Davet işleniyor…');
+  const { data: communityId, error } = await sb.rpc('join_community_by_code', { p_code: code });
+  if (error) {
+    app.innerHTML = `<div class="empty">Davet linki geçersiz veya yenilenmiş.<br><span class="small">${esc(error.message)}</span><br><br><a class="btn ghost" href="#/section/topluluklar">Topluluklara dön</a></div>`;
+    return;
+  }
+  location.hash = `#/topluluk/${encodeURIComponent(communityId)}`;
+}
+
+// ═══ Ortak üretim odaları ═══
+async function renderCollabRooms() {
+  if (!currentUser) { location.hash = '#/auth?login'; return; }
+  app.innerHTML = loadingBlock('Odalar açılıyor…');
+  const { data: memberships } = await sb.from('collab_room_members').select('room_id').eq('user_id', currentUser.id);
+  const roomIds = (memberships || []).map(m => m.room_id);
+  const { data: rooms } = roomIds.length
+    ? await sb.from('collab_rooms').select('*').in('id', roomIds).order('updated_at', { ascending: false })
+    : { data: [] };
+  const ownerIds = [...new Set((rooms || []).map(r => r.created_by))];
+  const { data: profs } = ownerIds.length ? await sb.from('profiles').select('id,username,display_name').in('id', ownerIds) : { data: [] };
+  const pMap = Object.fromEntries((profs || []).map(p => [p.id, p]));
+
+  app.innerHTML = `
+    <p><a href="#/">← Ana sayfa</a></p>
+    <section class="hero">
+      <div class="eyebrow">🏠 Ortak üretim</h1>
+      <h1>Üretim odaları</h1>
+      <p class="subtitle">Aynı metni birlikte yazın — oda kur, arkadaşını davet et, eşzamanlı çalışın.</p>
+    </section>
+    <section class="card">
+      <form id="roomCreateForm">
+        <div class="field"><label for="roomName">Yeni oda</label>
+          <input id="roomName" name="name" maxlength="80" required placeholder="Örn. Antoloji taslağı">
+        </div>
+        <button class="btn primary" type="submit">Oda kur</button>
+      </form>
+      <div id="roomCreateMsg" class="message"></div>
+    </section>
+    <section class="card">
+      <div class="section-head"><h2>Odalarım</h2></div>
+      ${(rooms || []).length ? rooms.map(r => `<div class="member-row">
+        <a class="member-id" href="#/oda/${encodeURIComponent(r.id)}"><span style="width:26px">📝</span><span>${esc(r.name)}<br><span class="small">kuran: ${esc(displayName(pMap[r.created_by]))} · son yazı: ${esc(formatDate(r.updated_at))}</span></span></a>
+      </div>`).join('') : '<div class="empty">Henüz odan yok — bir tane kur, kullanıcı adıyla arkadaşlarını davet et.</div>'}
+    </section>`;
+
+  document.getElementById('roomCreateForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = String(new FormData(e.currentTarget).get('name') || '').trim();
+    if (!name) return;
+    const { data: room, error } = await sb.from('collab_rooms').insert({ name, created_by: currentUser.id }).select('id').single();
+    if (error) { setSettingsMessage(document.getElementById('roomCreateMsg'), 'Oda kurulamadı: ' + error.message, true); return; }
+    await sb.from('collab_room_members').insert({ room_id: room.id, user_id: currentUser.id });
+    location.hash = `#/oda/${encodeURIComponent(room.id)}`;
+  });
+}
+
+let collabChannel = null;
+async function renderCollabRoom(id) {
+  if (!currentUser) { location.hash = '#/auth?login'; return; }
+  if (collabChannel) { sb.removeChannel(collabChannel); collabChannel = null; }
+  app.innerHTML = loadingBlock('Oda açılıyor…');
+  const { data: room, error } = await sb.from('collab_rooms').select('*').eq('id', id).maybeSingle();
+  if (error || !room) {
+    app.innerHTML = `<div class="empty">Oda bulunamadı veya üyesi değilsin.${error ? `<br><span class="small">${esc(error.message)}</span>` : ''}</div>`;
+    return;
+  }
+  const { data: members } = await sb.from('collab_room_members').select('user_id,joined_at').eq('room_id', id);
+  const memberIds = (members || []).map(m => m.user_id);
+  const { data: profs } = memberIds.length ? await sb.from('profiles').select('id,username,display_name').in('id', memberIds) : { data: [] };
+  const pMap = Object.fromEntries((profs || []).map(p => [p.id, p]));
+  const isCreator = room.created_by === currentUser.id;
+  const isMember = memberIds.includes(currentUser.id);
+  const wordCount = (room.doc || '').trim().split(/\s+/).filter(Boolean).length;
+
+  app.innerHTML = `
+    <p><a href="#/odalar">← Odalar</a></p>
+    <section class="hero" style="padding-bottom:8px">
+      <div class="eyebrow">🏠 Ortak üretim odası</h1>
+      <h1>${esc(room.name)}</h1>
+      <p class="meta">${memberIds.length} üye · ${wordCount} kelime · Son yazan: ${esc(displayName(pMap[room.updated_by] || pMap[room.created_by]))}</p>
+    </section>
+    ${!isMember ? `<div class="empty">Bu odaya davet edilmedin — kurucu kullanıcı adınla ekleyebilir.</div>` : `
+    <section class="card">
+      <div class="small" id="roomSync" style="margin-bottom:6px">⚡ Eşzamanlı — yazdıkların odadaki herkese anında düşer.</div>
+      <textarea id="roomDoc" class="collab-doc" spellcheck="true" placeholder="Birlikte yazmaya başlayın…">${esc(room.doc || '')}</textarea>
+      <div class="small" id="roomStatus" style="margin-top:6px"></div>
+    </section>
+    <section class="card">
+      <div class="section-head"><h2>Üyeler (${memberIds.length})</h2></div>
+      <div class="member-list">${(members || []).map(m => `<div class="member-row">
+        <a class="member-id" href="#/user/${encodeURIComponent(m.user_id)}"><span class="avatar">${initials(displayName(pMap[m.user_id]))}</span><span>${esc(displayName(pMap[m.user_id]))}${m.user_id === room.created_by ? ' <span class="small">· kurucu</span>' : ''}</span></a>
+        ${isCreator && m.user_id !== currentUser.id ? `<button class="btn ghost small room-kick" data-user="${esc(m.user_id)}" type="button">Çıkar</button>` : ''}
+      </div>`).join('')}</div>
+      <form id="roomInviteForm" style="margin-top:10px;display:flex;gap:8px">
+        <input id="roomInviteUser" name="username" maxlength="40" placeholder="kullaniciadi" style="flex:1">
+        <button class="btn" type="submit">Davet et</button>
+      </form>
+      <div id="roomInviteMsg" class="message"></div>
+      ${isCreator ? `<hr><p><button class="btn danger" id="roomDeleteBtn" type="button">Odayı sil</button></p>` : `<hr><p><button class="btn ghost" id="roomLeaveBtn" type="button">Odadan ayrıl</button></p>`}
+    </section>`}`;
+
+  if (!isMember) return;
+
+  const docEl = document.getElementById('roomDoc');
+  const statusEl = document.getElementById('roomStatus');
+  let saveTimer = null;
+  let remoteApply = false;
+  const pushDoc = async () => {
+    const text = docEl.value;
+    const { error: e2 } = await sb.from('collab_rooms').update({ doc: text, updated_by: currentUser.id, updated_at: new Date().toISOString() }).eq('id', id);
+    statusEl.textContent = e2 ? `Kaydedilemedi: ${e2.message}` : `Kaydedildi · ${new Date().toLocaleTimeString('tr-TR', { hour: '2-digit', minute: '2-digit' })}`;
+  };
+  docEl.addEventListener('input', () => {
+    if (remoteApply) return;
+    statusEl.textContent = 'Yazıyorsun…';
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(pushDoc, 1200);
+  });
+  docEl.addEventListener('blur', () => { clearTimeout(saveTimer); pushDoc(); });
+  window.addEventListener('pagehide', () => { clearTimeout(saveTimer); }, { once: true });
+
+  collabChannel = sb.channel(`collab-${id}`)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'collab_rooms', filter: `id=eq.${id}` }, ({ new: row }) => {
+      if (row.updated_by === currentUser.id) return;
+      remoteApply = true;
+      const pos = docEl.selectionStart;
+      const oldLen = docEl.value.length;
+      docEl.value = row.doc || '';
+      const diff = docEl.value.length - oldLen;
+      try { docEl.selectionStart = docEl.selectionEnd = Math.max(0, pos + diff); } catch {}
+      remoteApply = false;
+      statusEl.textContent = `Güncellendi — yazan: ${displayName(pMap[row.updated_by], 'Bir üye')}`;
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'collab_room_members', filter: `room_id=eq.${id}` }, () => renderCollabRoom(id))
+    .subscribe();
+
+  document.getElementById('roomInviteForm')?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const username = String(new FormData(e.currentTarget).get('username') || '').trim().replace(/^@/, '').toLowerCase();
+    const msg = document.getElementById('roomInviteMsg');
+    if (!username) return;
+    const { data: prof } = await sb.from('profiles').select('id').eq('username', username).maybeSingle();
+    if (!prof) { setSettingsMessage(msg, 'Kullanıcı bulunamadı.', true); return; }
+    if (memberIds.includes(prof.id)) { setSettingsMessage(msg, 'Zaten odada.', true); return; }
+    const { error: e2 } = await sb.from('collab_room_members').insert({ room_id: id, user_id: prof.id });
+    setSettingsMessage(msg, e2 ? 'Davet eklenemedi: ' + e2.message : `@${username} odaya eklendi.`, !!e2);
+  });
+  document.querySelectorAll('.room-kick').forEach(b => b.addEventListener('click', async () => {
+    if (!confirm('Bu üyeyi odadan çıkarmak istiyor musun?')) return;
+    await sb.from('collab_room_members').delete().eq('room_id', id).eq('user_id', b.dataset.user);
+    renderCollabRoom(id);
+  }));
+  document.getElementById('roomLeaveBtn')?.addEventListener('click', async () => {
+    if (!confirm('Odadan ayrılmak istiyor musun?')) return;
+    await sb.from('collab_room_members').delete().eq('room_id', id).eq('user_id', currentUser.id);
+    location.hash = '#/odalar';
+  });
+  document.getElementById('roomDeleteBtn')?.addEventListener('click', async () => {
+    if (!confirm('Oda ve içindeki metin kalıcı olarak silinecek. Emin misin?')) return;
+    const { error: e2 } = await sb.from('collab_rooms').delete().eq('id', id);
+    if (e2) { alert('Silinemedi: ' + e2.message); return; }
+    location.hash = '#/odalar';
+  });
+}
+
 function parseRoute() {
   const raw = location.hash.replace(/^#/, '') || '/';
   const [path, query = ''] = raw.split('?');
@@ -8144,6 +8512,9 @@ async function route() {
   if (view === 'seri') return renderSeries(safeDecode(arg));
   if (view === 'liste') return renderSharedList(safeDecode(arg));
   if (view === 'kulup') return renderClub(safeDecode(arg));
+  if (view === 'davet') return renderInviteJoin(safeDecode(arg));
+  if (view === 'odalar') return renderCollabRooms();
+  if (view === 'oda') return renderCollabRoom(safeDecode(arg));
   if (view === 'ayin-halkasi') return renderAyinHalkasi(query);
   if (view === 'meydan-okuma') return renderChallenges();
   if (view === 'kritik') return renderCritique();
@@ -8175,6 +8546,121 @@ function updateHelperContext() {
   const view = location.hash.replace(/^#\/?/, '').split('?')[0].split('/')[0] || '';
   if (helperPageTips[view]) helperAnswer.textContent = helperPageTips[view];
 }
+let lastNowDoing = '';
+async function setNowDoing(text) {
+  if (!currentUser || text === lastNowDoing) return;
+  lastNowDoing = text;
+  try {
+    await sb.from('profiles').update({ now_doing: text, now_doing_at: new Date().toISOString() }).eq('id', currentUser.id);
+  } catch {}
+}
+
+function initPlaybackMemory(postId) {
+  if (!currentUser) return;
+  const media = app.querySelector('video.media, audio.media');
+  if (!media) return;
+  let lastSaved = 0;
+  const save = () => {
+    const pos = Math.floor(media.currentTime);
+    if (!isFinite(pos) || pos < 3 || Math.abs(pos - lastSaved) < 5) return;
+    lastSaved = pos;
+    sb.from('playback_positions').upsert({
+      post_id: postId, user_id: currentUser.id, position_seconds: pos,
+      duration_seconds: isFinite(media.duration) ? Math.floor(media.duration) : null,
+      updated_at: new Date().toISOString()
+    }).then(() => {});
+  };
+  media.addEventListener('loadedmetadata', async () => {
+    const { data } = await sb.from('playback_positions').select('position_seconds,duration_seconds').eq('post_id', postId).eq('user_id', currentUser.id).maybeSingle();
+    if (data && Number(data.position_seconds) > 3 && (!data.duration_seconds || Number(data.position_seconds) < Number(data.duration_seconds) - 10)) {
+      media.currentTime = Number(data.position_seconds);
+      const hint = document.createElement('div');
+      hint.className = 'small';
+      hint.style.cssText = 'padding:4px 10px;color:var(--gold)';
+      hint.textContent = `▶ Kaldığın yerden devam ediyor: ${Math.floor(data.position_seconds / 60)}:${String(Math.floor(data.position_seconds % 60)).padStart(2, '0')}`;
+      media.parentElement?.insertBefore(hint, media.nextSibling);
+      setTimeout(() => hint.remove(), 8000);
+    }
+  });
+  media.addEventListener('timeupdate', () => { if (media.currentTime - lastSaved > 10) save(); });
+  media.addEventListener('pause', save);
+  media.addEventListener('ended', () => {
+    sb.from('playback_positions').delete().eq('post_id', postId).eq('user_id', currentUser.id).then(() => {});
+  });
+}
+
+function startWritingSprint(textarea) {
+  if (!textarea || document.querySelector('.sprint-overlay')) return;
+  const startWords = (textarea.value.trim().match(/\S+/g) || []).length;
+  const overlay = document.createElement('div');
+  overlay.className = 'sprint-overlay';
+  overlay.innerHTML = `<div class="sprint-card">
+    <div class="sprint-info">⏱️ Yazma sprint'i — süre seç, sonra sadece üret:</div>
+    <div style="display:flex;gap:8px;justify-content:center;margin-top:12px">
+      <button class="btn ghost" data-min="10" type="button">10 dk</button>
+      <button class="btn primary" data-min="25" type="button">25 dk</button>
+      <button class="btn ghost" data-min="45" type="button">45 dk</button>
+    </div>
+    <button class="btn ghost small" data-act="cancel" type="button" style="margin-top:12px">Vazgeç</button>
+  </div>`;
+  document.body.appendChild(overlay);
+  let timer = null;
+  const close = () => { if (timer) clearInterval(timer); overlay.remove(); };
+  const finish = card => {
+    const gained = (textarea.value.trim().match(/\S+/g) || []).length - startWords;
+    card.innerHTML = `<div class="sprint-info">⏱️ Sprint bitti!</div>
+      <div class="sprint-time">${gained >= 0 ? `+${gained}` : gained}</div>
+      <div class="sprint-info">${gained > 0 ? 'kelime yazdın 🔥' : 'kelime — bir dahaki sprinte!'}</div>
+      <button class="btn primary" data-act="close" type="button" style="margin-top:14px">Kapat</button>`;
+    card.querySelector('[data-act="close"]').addEventListener('click', close);
+  };
+  overlay.querySelector('[data-act="cancel"]').addEventListener('click', close);
+  overlay.querySelectorAll('[data-min]').forEach(btn => btn.addEventListener('click', () => {
+    let left = Number(btn.dataset.min) * 60;
+    const card = overlay.querySelector('.sprint-card');
+    card.innerHTML = `<div class="sprint-info">Odaklan — düzenleme sonra:</div>
+      <div class="sprint-time"></div>
+      <div class="sprint-info"></div>
+      <button class="btn ghost small" data-act="stop" type="button" style="margin-top:10px">Sprint'i bitir</button>`;
+    card.querySelector('[data-act="stop"]').addEventListener('click', () => { left = 0; });
+    const tick = () => {
+      if (left <= 0) { clearInterval(timer); finish(card); return; }
+      card.querySelector('.sprint-time').textContent = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+      const gained = (textarea.value.trim().match(/\S+/g) || []).length - startWords;
+      card.querySelectorAll('.sprint-info')[1].textContent = `${gained >= 0 ? '+' : ''}${gained} kelime`;
+      left--;
+    };
+    tick();
+    timer = setInterval(tick, 1000);
+  }));
+}
+
+function heartBurst(x, y) {
+  const heart = document.createElement('div');
+  heart.className = 'dbl-like-heart';
+  heart.textContent = '❤️';
+  heart.style.left = `${x}px`;
+  heart.style.top = `${y}px`;
+  document.body.appendChild(heart);
+  setTimeout(() => heart.remove(), 900);
+}
+
+function playNotificationSound() {
+  try {
+    const ctx = playNotificationSound.ctx || (playNotificationSound.ctx = new (window.AudioContext || window.webkitAudioContext)());
+    if (ctx.state === 'suspended') ctx.resume();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(660, ctx.currentTime + 0.12);
+    gain.gain.setValueAtTime(0.06, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime + 0.32);
+  } catch {}
+}
+
 function cemberCelebrate(text) {
   helperAnswer.textContent = text;
   helperToggle.classList.add('celebrate');
@@ -8247,6 +8733,7 @@ async function init() {
       notifRealtime = sb.channel(`notif-${currentUser.id}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications', filter: `user_id=eq.${currentUser.id}` }, () => {
           refreshNotificationBadge();
+          playNotificationSound();
           if (!location.hash.startsWith('#/notifications')) cemberCelebrate('🔔 Yeni bir bildirimin var — Bildirimler sayfasına bakabilirsin.');
         })
         .subscribe();
@@ -8257,7 +8744,7 @@ async function init() {
     if (!currentUser || document.hidden) return;
     sb.from('profiles').update({ last_active_at: new Date().toISOString() }).eq('id', currentUser.id).then(() => {});
   }, 120000);
-  route();
+  if (!(currentUser && consumeAfterLogin())) route();
 }
 
 const helperPanel = document.getElementById('halkaHelperPanel');
