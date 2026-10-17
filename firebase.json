@@ -10,6 +10,8 @@
       "**/.*",
       "**/node_modules/**",
       "supabase/**",
+      "jarvis_ref/**",
+      "_*.py",
       "*.md"
     ],
     "rewrites": [
