@@ -9094,7 +9094,6 @@ document.getElementById('halkaHelperForm').addEventListener('submit', async even
   event.preventDefault();
   const rawQ = document.getElementById('halkaHelperInput').value.trim();
   const question = rawQ.toLocaleLowerCase('tr-TR');
-  const keywordReply = () => {
   const key = /müzik|muzik|şarkı|sarki|beste|parça|parca|ses kayıt|ses kayit/.test(question) ? 'music'
     : /topluluk|community|sunucu/.test(question) ? 'community'
     : /sohbet.*(kişiselleştir|kisisellestir|özelleştir|ozellestir|renk|ad|isim)|kişiselleştir|kisisellestir/.test(question) ? 'chatcustom'
@@ -9106,7 +9105,11 @@ document.getElementById('halkaHelperForm').addEventListener('submit', async even
     : /sohbet|mesaj|grup/.test(question) ? 'chat'
     : /şifre|sifre|güven|guven|hesap/.test(question) ? 'security'
     : /foto|görsel|gorsel|resim|video/.test(question) ? 'image' : 'help';
-  showHelperReply(key); };
+  const keywordReply = () => {
+    const option = helperReplies[key] || helperReplies.help;
+    const [r] = typeof option === 'function' ? option() : option;
+    cemberBubble(esc(r), 'bot');
+  };
   event.currentTarget.reset();
   if (!rawQ) return;
   cemberBubble(esc(rawQ), 'user');
