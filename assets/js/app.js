@@ -9228,7 +9228,8 @@ async function toggleVoiceRecord(btn) {
         form.dataset.audioPath = path;
         form.dataset.audioSeconds = String(Math.round((Date.now() - started) / 1000));
         form.querySelector('.voice-attached')?.remove();
-        btn.insertAdjacentHTML('afterend', '<span class="small voice-attached">🎙️ sesli yorum eklendi <a href="#" data-rmvoice>✕</a></span>');
+        const secs = Math.round((Date.now() - started) / 1000);
+        btn.insertAdjacentHTML('afterend', `<span class="voice-attached"><audio class="voice-preview" src="${URL.createObjectURL(blob)}" controls preload="metadata"></audio><span class="small">${secs}sn</span> <a href="#" data-rmvoice>✕</a></span>`);
       }
     };
     cVoiceRec.start();
