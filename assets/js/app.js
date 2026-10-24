@@ -267,14 +267,14 @@ function levelInfo(score) {
 }
 
 const TRACK_DEFS = [
-  { key: 'writing', name: 'Yazı', icon: '🖋️', stages: ['İmza', 'Kalem', 'Muharrir', 'Edebiyatçı'], need: [1, 10, 30, 100] },
-  { key: 'drawing', name: 'Çizim', icon: '🎨', stages: ['Eskiz', 'Fırça', 'Ressam', 'Galeri'], need: [1, 10, 30, 100] },
-  { key: 'photo', name: 'Fotoğraf', icon: '📷', stages: ['Kadraj', 'Vizör', 'Fotoğrafçı', 'Sergi'], need: [1, 10, 30, 100] },
-  { key: 'video', name: 'Video', icon: '🎬', stages: ['Perde', 'Yönetmen', 'Stüdyo', 'Sinemacı'], need: [1, 10, 30, 100] },
-  { key: 'music', name: 'Müzik', icon: '🎵', stages: ['Nota', 'Melodi', 'Besteci', 'Maestro'], need: [1, 10, 30, 100] },
-  { key: 'likes', name: 'Beğeni', icon: '❤️', stages: ['Kıvılcım', 'Sevilen', 'Gözde', 'İkon'], need: [10, 100, 500, 2000] },
-  { key: 'followers', name: 'Takipçi', icon: '👥', stages: ['İlk Halka', 'Cemiyet', 'Merkez', 'Yıldız'], need: [1, 10, 50, 200] },
-  { key: 'bugs', name: 'Katkı', icon: '🔧', stages: ['Dikkatli', 'Kusur Avcısı', 'Bakım Teknisyeni'], need: [1, 5, 15], secret: true }
+  { key: 'writing', name: 'Yazı', icon: '🖋️', stages: ['İmza', 'Kalem', 'Muharrir', 'Edebiyatçı', 'Üstat'], need: [1, 10, 50, 100, 250] },
+  { key: 'drawing', name: 'Çizim', icon: '🎨', stages: ['Eskiz', 'Fırça', 'Ressam', 'Galeri', 'Usta'], need: [1, 10, 50, 100, 250] },
+  { key: 'photo', name: 'Fotoğraf', icon: '📷', stages: ['Kadraj', 'Vizör', 'Fotoğrafçı', 'Sergi', 'Efsane'], need: [1, 10, 50, 100, 250] },
+  { key: 'video', name: 'Video', icon: '🎬', stages: ['Perde', 'Yönetmen', 'Stüdyo', 'Sinemacı', 'Efsane'], need: [1, 10, 50, 100, 250] },
+  { key: 'music', name: 'Müzik', icon: '🎵', stages: ['Nota', 'Melodi', 'Besteci', 'Maestro', 'Efsane'], need: [1, 10, 50, 100, 250] },
+  { key: 'likes', name: 'Beğeni', icon: '❤️', stages: ['Kıvılcım', 'Sevilen', 'Gözde', 'İkon', 'Efsane'], need: [1, 10, 50, 100, 250] },
+  { key: 'followers', name: 'Takipçi', icon: '👥', stages: ['İlk Halka', 'Cemiyet', 'Merkez', 'Yıldız', 'Efsane'], need: [1, 10, 50, 100, 250] },
+  { key: 'bugs', name: 'Katkı', icon: '🔧', stages: ['Dikkatli', 'Kusur Avcısı', 'Bakım Teknisyeni', 'Sistem Doktoru', 'Bakım Efsanesi'], need: [1, 10, 50, 100, 250], secret: true }
 ];
 
 const BADGE_DEFS = [
