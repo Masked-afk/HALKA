@@ -2257,55 +2257,44 @@ async function renderRead(id, query = '') {
   const canReportPost = !!currentUser && !isOwner;
 
   const commentsByParent = new Map();
-  // ── Etkileşim paketi verileri: anketler, tepkiler, sesli yorum, ilham zinciri ──
+  // ── Etkileşim paketi verileri (paralel çekim) ──
   const pollByCh = {}, votesByPoll = {};
-  if (chapterIds.length) {
-    const { data: polls } = await sb.from('chapter_polls').select('*').in('chapter_id', chapterIds);
-    (polls || []).forEach(p => { pollByCh[p.chapter_id] = p; });
-    const pollIds = (polls || []).map(p => p.id);
-    if (pollIds.length) {
-      const { data: votes } = await sb.from('chapter_poll_votes').select('poll_id,option_index,user_id').in('poll_id', pollIds);
-      (votes || []).forEach(v => {
-        const e = votesByPoll[v.poll_id] = votesByPoll[v.poll_id] || { counts: {}, mine: null };
-        e.counts[v.option_index] = (e.counts[v.option_index] || 0) + 1;
-        if (currentUser && v.user_id === currentUser.id) e.mine = v.option_index;
-      });
-    }
-  }
   const postRx = { counts: {}, mine: new Set() };
-  {
-    const { data: rx } = await sb.from('post_reactions').select('emoji,user_id').eq('post_id', id);
-    (rx || []).forEach(r => { postRx.counts[r.emoji] = (postRx.counts[r.emoji] || 0) + 1; if (currentUser && r.user_id === currentUser.id) postRx.mine.add(r.emoji); });
-  }
   const commentRx = {}, commentRxMine = {};
+  const audioUrlMap = {};
+  let inspiredSrc = null, derivatives = [];
   {
     const cIds = comments.map(c => c.id);
-    if (cIds.length) {
-      const { data: crx } = await sb.from('comment_reactions').select('comment_id,emoji,user_id').in('comment_id', cIds);
-      (crx || []).forEach(r => {
-        (commentRx[r.comment_id] = commentRx[r.comment_id] || {})[r.emoji] = (commentRx[r.comment_id][r.emoji] || 0) + 1;
-        if (currentUser && r.user_id === currentUser.id) (commentRxMine[r.comment_id] = commentRxMine[r.comment_id] || new Set()).add(r.emoji);
-      });
-    }
-  }
-  const audioUrlMap = {};
-  comments.filter(c => c.audio_path).forEach(c => { audioUrlMap[c.audio_path] = sb.storage.from('post-media').getPublicUrl(c.audio_path).data.publicUrl; });
-  let inspiredSrc = null, derivatives = [];
-  if (post.inspired_by) {
-    const { data: src } = await sb.from('posts').select('id,title,author_id').eq('id', post.inspired_by).maybeSingle();
-    if (src) {
-      const { data: sp } = await sb.from('profiles').select('id,username,display_name').eq('id', src.author_id).maybeSingle();
-      inspiredSrc = { ...src, name: displayName(sp) };
-    }
-  }
-  {
-    const { data: dv } = await sb.from('posts').select('id,title,author_id').eq('inspired_by', id).eq('is_draft', false).order('created_at', { ascending: false }).limit(8);
-    if ((dv || []).length) {
-      const dIds = [...new Set(dv.map(d => d.author_id))];
-      const { data: dps } = await sb.from('profiles').select('id,username,display_name').in('id', dIds);
-      const dpm = Object.fromEntries((dps || []).map(p => [p.id, p]));
-      derivatives = dv.map(d => ({ ...d, name: displayName(dpm[d.author_id]) }));
-    }
+    const [pollsRes, postRxRes, crxRes, srcRes, dvRes] = await Promise.all([
+      chapterIds.length ? sb.from('chapter_polls').select('*').in('chapter_id', chapterIds) : { data: [] },
+      sb.from('post_reactions').select('emoji,user_id').eq('post_id', id),
+      cIds.length ? sb.from('comment_reactions').select('comment_id,emoji,user_id').in('comment_id', cIds) : { data: [] },
+      post.inspired_by ? sb.from('posts').select('id,title,author_id').eq('id', post.inspired_by).maybeSingle() : { data: null },
+      sb.from('posts').select('id,title,author_id').eq('inspired_by', id).eq('is_draft', false).order('created_at', { ascending: false }).limit(8),
+    ]);
+    const pollIds = (pollsRes.data || []).map(p => p.id);
+    const srcPost = srcRes.data;
+    const dvPosts = dvRes.data || [];
+    const depIds = [...new Set([...(srcPost ? [srcPost.author_id] : []), ...dvPosts.map(d => d.author_id)])];
+    const [votesRes, profsRes] = await Promise.all([
+      pollIds.length ? sb.from('chapter_poll_votes').select('poll_id,option_index,user_id').in('poll_id', pollIds) : { data: [] },
+      depIds.length ? sb.from('profiles').select('id,username,display_name').in('id', depIds) : { data: [] },
+    ]);
+    const profMap = Object.fromEntries((profsRes.data || []).map(p => [p.id, p]));
+    (pollsRes.data || []).forEach(p => { pollByCh[p.chapter_id] = p; });
+    (votesRes.data || []).forEach(v => {
+      const e = votesByPoll[v.poll_id] = votesByPoll[v.poll_id] || { counts: {}, mine: null };
+      e.counts[v.option_index] = (e.counts[v.option_index] || 0) + 1;
+      if (currentUser && v.user_id === currentUser.id) e.mine = v.option_index;
+    });
+    (postRxRes.data || []).forEach(r => { postRx.counts[r.emoji] = (postRx.counts[r.emoji] || 0) + 1; if (currentUser && r.user_id === currentUser.id) postRx.mine.add(r.emoji); });
+    (crxRes.data || []).forEach(r => {
+      (commentRx[r.comment_id] = commentRx[r.comment_id] || {})[r.emoji] = (commentRx[r.comment_id][r.emoji] || 0) + 1;
+      if (currentUser && r.user_id === currentUser.id) (commentRxMine[r.comment_id] = commentRxMine[r.comment_id] || new Set()).add(r.emoji);
+    });
+    comments.filter(c => c.audio_path).forEach(c => { audioUrlMap[c.audio_path] = sb.storage.from('post-media').getPublicUrl(c.audio_path).data.publicUrl; });
+    if (srcPost) inspiredSrc = { ...srcPost, name: displayName(profMap[srcPost.author_id]) };
+    derivatives = dvPosts.map(d => ({ ...d, name: displayName(profMap[d.author_id]) }));
   }
   const inspiredHTML = `${inspiredSrc ? `<div class="inspired-src small">💡 İlham kaynağı: <a href="#/read/${encodeURIComponent(inspiredSrc.id)}"><strong>${esc(inspiredSrc.title || 'Eser')}</strong></a> — ${esc(inspiredSrc.name)}</div>` : ''}${derivatives.length ? `<div class="derivatives"><div class="small" style="margin-bottom:6px">🌱 Bu eserden doğanlar:</div>${derivatives.map(d => `<a class="deriv-chip" href="#/read/${encodeURIComponent(d.id)}">${esc(d.title || 'Eser')} <span>· ${esc(d.name)}</span></a>`).join('')}</div>` : ''}`;
   const chapterPollHTML = ch => {
@@ -6272,7 +6261,7 @@ async function renderDiscover(query = '') {
   const myHash = location.hash;
   app.innerHTML = `
     <section class="hero" style="padding-bottom:8px"><div class="eyebrow">Halka · Keşfet</div><h1>${quick ? 'Hızlı keşfet' : 'Keşfet'}</h1><p class="subtitle">${quick ? 'Yeni eserleri kaydırarak gözden geçir.' : 'İlham veren yazıları, görselleri, videoları ve müzikleri bul.'}</p></section>
-    <div class="discover-switch"><a class="${!quick ? 'on' : ''}" href="#/section/kesfet${themeId ? `?theme=${encodeURIComponent(themeId)}` : ''}">Keşfet sayfası</a><a class="${quick ? 'on' : ''}" href="#/section/kesfet?sub=hizli${themeId ? `&theme=${encodeURIComponent(themeId)}` : ''}">Hızlı keşfet</a><a href="#/ayin-halkasi">🏆 Ayın Halka'sı</a><a href="#/meydan-okuma">⚡ Meydan okuma</a><a href="#/kritik">🎯 Kritik</a></div>
+    <div class="discover-switch"><a class="${!quick ? 'on' : ''}" href="#/section/kesfet${themeId ? `?theme=${encodeURIComponent(themeId)}` : ''}">Keşfet sayfası</a><a class="${quick ? 'on' : ''}" href="#/section/kesfet?sub=hizli${themeId ? `&theme=${encodeURIComponent(themeId)}` : ''}">Hızlı keşfet</a><a href="#/ayin-halkasi">🏆 Ayın Halka'sı</a><a href="#/meydan-okuma">⚡ Meydan okuma</a><a href="#/kritik">🎯 Kritik</a><a href="#/dergi">📖 Dergi</a></div>
     ${themeInfo ? `<div class="card theme-card" style="margin-bottom:14px"><div class="eyebrow">🎨 Tema filtresi</div><strong>${esc(themeInfo.title || 'Tema')}</strong> <a class="small" href="#/section/kesfet">filtreyi kaldır</a></div>` : ''}
     <div class="chips">${filters.map(([label,type]) => `<a class="chip ${selected === type ? 'on' : ''}" href="${linkFor(type)}">${label}</a>`).join('')}</div>
     <div id="discoverFeed">${loadingBlock('Eserler yükleniyor…')}</div>`;
@@ -8700,6 +8689,7 @@ async function route() {
   if (view === 'koleksiyonlar') return renderCollections();
   if (view === 'ozet') return renderOzet();
   if (view === 'relay') return arg ? renderRelay(safeDecode(arg)) : renderRelayList();
+  if (view === 'dergi') return arg ? renderIssue(safeDecode(arg)) : renderIssues();
   if (view === 'user') return renderProfile(safeDecode(arg));
   return renderHome();
 }
@@ -9420,6 +9410,117 @@ new MutationObserver(ms => {
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
+
+// ── Kolektif dergi/sayı ──
+async function renderIssues() {
+  app.innerHTML = loadingBlock('Dergiler yükleniyor…');
+  const [pubRes, mineRes, ipRes] = await Promise.all([
+    sb.from('joint_issues').select('*').eq('is_published', true).order('created_at', { ascending: false }),
+    currentUser ? sb.from('joint_issues').select('*').eq('creator_id', currentUser.id).eq('is_published', false) : { data: [] },
+    sb.from('issue_posts').select('issue_id').eq('status', 'accepted'),
+  ]);
+  const issues = pubRes.data || [];
+  const counts = {};
+  (ipRes.data || []).forEach(r => { counts[r.issue_id] = (counts[r.issue_id] || 0) + 1; });
+  const creatorIds = [...new Set(issues.map(i => i.creator_id))];
+  const { data: profs } = creatorIds.length ? await sb.from('profiles').select('id,username,display_name').in('id', creatorIds) : { data: [] };
+  const pMap = Object.fromEntries((profs || []).map(p => [p.id, p]));
+  const row = i => `<a class="member-id" href="#/dergi/${encodeURIComponent(i.id)}">📖 <strong>${esc(i.title)}</strong> <span class="small">${counts[i.id] || 0} eser · ${esc(displayName(pMap[i.creator_id]))}</span></a>`;
+  app.innerHTML = `
+    <section class="hero"><div class="eyebrow">📖 Kolektif dergi</div><h1>Ortak sayılar</h1>
+      <p>Birden çok üreticinin eserini tek sayıda buluştur — kur, topla, yayınla.</p></section>
+    ${currentUser ? `<p><button class="btn primary" id="issueCreateBtn">＋ Yeni sayı kur</button></p>` : ''}
+    ${(mineRes.data || []).length ? `<section class="card"><h3>📝 Taslak sayıların</h3>${mineRes.data.map(row).join('')}</section>` : ''}
+    <section class="card">${issues.length ? issues.map(row).join('') : '<div class="empty">Henüz yayınlanmış sayı yok — ilkini sen kur.</div>'}</section>`;
+  document.getElementById('issueCreateBtn')?.addEventListener('click', async () => {
+    const title = (prompt('Sayı başlığı:') || '').trim();
+    if (!title) return;
+    const description = (prompt('Kısa tanıtım (isteğe bağlı):') || '').trim();
+    const { data, error } = await sb.from('joint_issues').insert({ creator_id: currentUser.id, title, description }).select().single();
+    if (error) return alert('Sayı kurulamadı: ' + error.message);
+    location.hash = '#/dergi/' + encodeURIComponent(data.id);
+  });
+}
+
+async function renderIssue(id) {
+  app.innerHTML = loadingBlock('Sayı yükleniyor…');
+  const { data: issue, error } = await sb.from('joint_issues').select('*').eq('id', id).maybeSingle();
+  if (error || !issue) { app.innerHTML = '<div class="empty">Bu sayı bulunamadı veya henüz yayınlanmadı.</div>'; return; }
+  const isCreator = !!currentUser && issue.creator_id === currentUser.id;
+  const [{ data: creator }, { data: entries }] = await Promise.all([
+    sb.from('profiles').select('id,username,display_name').eq('id', issue.creator_id).maybeSingle(),
+    sb.from('issue_posts').select('*').eq('issue_id', id).order('position'),
+  ]);
+  const list = entries || [];
+  const accepted = list.filter(e => e.status === 'accepted');
+  const pending = list.filter(e => e.status === 'pending');
+  const postIds = list.map(e => e.post_id);
+  const { data: posts } = postIds.length ? await sb.from('posts').select('*').in('id', postIds) : { data: [] };
+  const pById = Object.fromEntries((posts || []).map(p => [p.id, p]));
+  const authorIds = [...new Set((posts || []).map(p => p.author_id))];
+  const { data: aps } = authorIds.length ? await sb.from('profiles').select('id,username,display_name').in('id', authorIds) : { data: [] };
+  const aMap = Object.fromEntries((aps || []).map(p => [p.id, p]));
+  const rowOf = (e, i, len) => {
+    const p = pById[e.post_id];
+    if (!p) return '';
+    return `<div class="member-id" style="display:flex;align-items:center;gap:8px"><a href="#/read/${encodeURIComponent(p.id)}" style="flex:1">${i + 1}. ${esc(p.title || 'Başlıksız')} <span class="small">· ${esc(displayName(aMap[p.author_id]))}</span></a>${isCreator ? `<button class="btn ghost small ip-move" data-p="${esc(p.id)}" data-d="-1" ${i === 0 ? 'disabled' : ''}>↑</button><button class="btn ghost small ip-move" data-p="${esc(p.id)}" data-d="1" ${i === len - 1 ? 'disabled' : ''}>↓</button><button class="btn ghost small ip-del" data-p="${esc(p.id)}">✕</button>` : ''}</div>`;
+  };
+  const pendRow = e => {
+    const p = pById[e.post_id];
+    return p ? `<div class="member-id" style="display:flex;gap:8px;align-items:center"><a href="#/read/${encodeURIComponent(p.id)}" style="flex:1">${esc(p.title || '')} <span class="small">· ${esc(displayName(aMap[p.author_id]))}</span></a><button class="btn primary small ip-acc" data-p="${esc(p.id)}">Kabul</button><button class="btn ghost small ip-del" data-p="${esc(p.id)}">Reddet</button></div>` : '';
+  };
+  app.innerHTML = `
+    <p><a href="#/dergi">← Dergiler</a></p>
+    <section class="hero"><div class="eyebrow">📖 Kolektif sayı</div><h1>${esc(issue.title)}</h1>
+      ${issue.description ? `<p>${esc(issue.description)}</p>` : ''}
+      <p class="meta">Küratör: ${esc(displayName(creator))} · ${accepted.length} eser${issue.is_published ? '' : ' · 📝 Taslak'}</p></section>
+    ${isCreator ? `<div class="post-actions">
+      <button class="btn ${issue.is_published ? 'ghost' : 'primary'} small" id="issuePubBtn">${issue.is_published ? '↩ Yayından çek' : '📢 Yayınla'}</button>
+      <button class="btn danger small" id="issueDelBtn">🗑 Sil</button></div>` : ''}
+    ${currentUser && !isCreator ? `<p><button class="btn ghost small" id="issueSubmitBtn">✍️ Eserimi öner</button></p>` : ''}
+    ${isCreator && pending.length ? `<section class="card"><h3>⏳ Onay bekleyenler (${pending.length})</h3>${pending.map(pendRow).join('')}</section>` : ''}
+    <section class="card">${accepted.length ? accepted.map((e, i) => rowOf(e, i, accepted.length)).join('') : '<div class="empty">Bu sayıda henüz eser yok.</div>'}</section>`;
+
+  document.getElementById('issuePubBtn')?.addEventListener('click', async () => {
+    const { error: e2 } = await sb.from('joint_issues').update({ is_published: !issue.is_published }).eq('id', id);
+    if (e2) return alert(e2.message);
+    renderIssue(id);
+  });
+  document.getElementById('issueDelBtn')?.addEventListener('click', async () => {
+    if (!confirm('Bu sayıyı silmek istediğinden emin misin?')) return;
+    await sb.from('joint_issues').delete().eq('id', id);
+    location.hash = '#/dergi';
+  });
+  document.getElementById('issueSubmitBtn')?.addEventListener('click', async () => {
+    const { data: mine } = await sb.from('posts').select('id,title').eq('author_id', currentUser.id).eq('is_draft', false).order('created_at', { ascending: false }).limit(30);
+    if (!(mine || []).length) return alert('Önerebileceğin yayınlanmış eserin yok.');
+    const menu = mine.map((p, i) => `${i + 1}) ${p.title || 'Başlıksız'}`).join('\n');
+    const pick = parseInt(prompt(`Hangi eserini öneriyorsun?\n${menu}\n\nNumara gir:`), 10);
+    const chosen = mine[pick - 1];
+    if (!chosen) return;
+    const { error: e2 } = await sb.from('issue_posts').insert({ issue_id: id, post_id: chosen.id, added_by: currentUser.id, position: accepted.length });
+    if (e2) return alert('Önerilemedi: ' + (e2.message.includes('duplicate') ? 'Bu eser zaten sayıda.' : e2.message));
+    alert('Önerildi — küratör onayı bekleniyor.');
+    renderIssue(id);
+  });
+  app.querySelectorAll('.ip-acc').forEach(b => b.addEventListener('click', async () => {
+    await sb.from('issue_posts').update({ status: 'accepted', position: accepted.length }).eq('issue_id', id).eq('post_id', b.dataset.p);
+    renderIssue(id);
+  }));
+  app.querySelectorAll('.ip-del').forEach(b => b.addEventListener('click', async () => {
+    await sb.from('issue_posts').delete().eq('issue_id', id).eq('post_id', b.dataset.p);
+    renderIssue(id);
+  }));
+  app.querySelectorAll('.ip-move').forEach(b => b.addEventListener('click', async () => {
+    const i = accepted.findIndex(e => e.post_id === b.dataset.p);
+    const j = i + Number(b.dataset.d);
+    if (i < 0 || j < 0 || j >= accepted.length) return;
+    const a = accepted[i], c = accepted[j];
+    await sb.from('issue_posts').update({ position: c.position }).eq('issue_id', id).eq('post_id', a.post_id);
+    await sb.from('issue_posts').update({ position: a.position }).eq('issue_id', id).eq('post_id', c.post_id);
+    renderIssue(id);
+  }));
 }
 
 init().catch(err => {
