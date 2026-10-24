@@ -5039,14 +5039,14 @@ async function renderChat(conversationId, query = '') {
     if (!document.getElementById('chatMessages') || !location.hash.includes(encodeURIComponent(activeId))) return;
     const box = document.getElementById('chatMessages');
     const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 100;
-    let result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at,delivered_at,read_at,edited_at,deleted_at,pinned_by')
+    let result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at,delivered_at,read_at,edited_at,deleted_at,pinned_by,is_bot')
       .eq('conversation_id', activeId).order('created_at', { ascending: true }).limit(150);
     if (result.error && /pinned_by/i.test(result.error.message || '')) {
-      result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at,delivered_at,read_at,edited_at,deleted_at')
+      result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at,delivered_at,read_at,edited_at,deleted_at,is_bot')
         .eq('conversation_id', activeId).order('created_at', { ascending: true }).limit(150);
     }
     if (result.error && /delivered_at|read_at|edited_at|deleted_at|schema cache|does not exist/i.test(result.error.message || '')) {
-      result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at')
+      result = await sb.from('messages').select('id,conversation_id,sender_id,body,shared_post_id,attachment_path,attachment_mime,attachment_name,created_at,is_bot')
         .eq('conversation_id', activeId).order('created_at', { ascending: true }).limit(150);
     }
     if (result.error) { box.innerHTML = `<div class="small">Mesajlar yüklenemedi: ${esc(result.error.message)}</div>`; return; }
@@ -5091,8 +5091,8 @@ async function renderChat(conversationId, query = '') {
       <article class="chat-message deleted ${row.sender_id === currentUser.id ? 'mine' : ''}">
         <div class="chat-message-body small">Bu mesaj silindi.</div>
       </article>` : `
-      <article class="chat-message ${row.sender_id === currentUser.id ? 'mine' : ''}" data-msg-id="${esc(row.id)}">
-        ${row.sender_id !== currentUser.id ? `<div class="chat-message-author">${esc(displayName(senders[row.sender_id], 'Halka kullanıcısı'))}</div>` : ''}
+      <article class="chat-message ${row.sender_id === currentUser.id && !row.is_bot ? 'mine' : ''}" data-msg-id="${esc(row.id)}">
+        ${row.sender_id !== currentUser.id || row.is_bot ? `<div class="chat-message-author">${row.is_bot ? 'Çember 🤖' : esc(displayName(senders[row.sender_id], 'Halka kullanıcısı'))}</div>` : ''}
         ${row.body ? `<div class="chat-message-body">${esc(row.body)}</div>` : ''}
         ${row.shared_post_id && posts[row.shared_post_id] ? chatPostPreview(posts[row.shared_post_id]) : ''}
         ${row.attachment_path && attachmentUrls[row.attachment_path] ? chatAttachmentHTML(row, attachmentUrls[row.attachment_path]) : row.attachment_path ? '<div class="small">Ek açılamadı.</div>' : ''}
@@ -5200,6 +5200,7 @@ async function renderChat(conversationId, query = '') {
     if (file) Object.assign(messageRow, { attachment_path: attachmentPath, attachment_mime: file.type, attachment_name: file.name });
     const { error } = await sb.from('messages').insert(messageRow);
     if (error && attachmentPath) await sb.storage.from('chat-media').remove([attachmentPath]);
+    if (!error && body) cemberReplyIfMentioned(body, reply => sb.from('messages').insert({ conversation_id: activeId, sender_id: currentUser.id, body: '🤖 ' + reply, is_bot: true, delivered_at: new Date().toISOString() }));
     button.disabled = false;
     if (error) { setSettingsMessage(status, `Mesaj gönderilemedi: ${error.message}`, true); return; }
     bodyEl.value = '';
@@ -7338,7 +7339,7 @@ async function renderCommunity(id, query = '') {
     activeChannel = channels.find(c => c.id === wantChannel) || channels[0] || null;
     if (activeChannel) {
       const { data: msgs } = await sb.from('community_channel_messages')
-        .select('id,sender_id,body,pinned_by,created_at')
+        .select('id,sender_id,body,pinned_by,created_at,is_bot')
         .eq('channel_id', activeChannel.id).order('created_at', { ascending: true }).limit(200);
       channelMessages = msgs || [];
     }
@@ -7474,8 +7475,8 @@ async function renderCommunity(id, query = '') {
         <a class="channel-tab ${c.id === activeChannel?.id ? 'on' : ''}" href="#/topluluk/${encodeURIComponent(id)}?${channelQuery(c.id)}">${c.min_write_role === 'admin' ? '📢' : '#'}${esc(c.name)}${isAdmin ? `<span class="channel-del" data-channel="${esc(c.id)}" title="Kanalı sil">✕</span>` : ''}</a>`).join('')}</div>
       ${pinnedMessages.length ? `<div class="channel-pinned">${pinnedMessages.map(m => `<div class="channel-pinned-msg">📌 <strong>${esc(displayName(profileMap[m.sender_id], 'Üye'))}:</strong> ${esc(m.body.slice(0, 140))}${m.body.length > 140 ? '…' : ''}</div>`).join('')}</div>` : ''}
       <div id="channelMessages" class="channel-messages">${channelMessages.length ? channelMessages.map(m => `
-        <div class="channel-msg ${m.sender_id === currentUser.id ? 'mine' : ''}">
-          <span class="channel-msg-author">${esc(displayName(profileMap[m.sender_id], 'Üye'))}</span>
+        <div class="channel-msg ${m.sender_id === currentUser.id && !m.is_bot ? 'mine' : ''}${m.is_bot ? ' bot-msg' : ''}">
+          <span class="channel-msg-author">${m.is_bot ? 'Çember 🤖' : esc(displayName(profileMap[m.sender_id], 'Üye'))}</span>
           <span class="channel-msg-body">${esc(m.body)}</span>
           <span class="small">${esc(new Date(m.created_at).toLocaleString('tr-TR', { dateStyle: 'short', timeStyle: 'short' }))}</span>
           ${isAdmin ? `<button class="chat-msg-act channel-pin" data-msg="${esc(m.id)}" data-pinned="${m.pinned_by ? '1' : ''}" type="button" title="${m.pinned_by ? 'Sabitlemeyi kaldır' : 'Sabitle'}">📌</button>` : ''}
@@ -7851,7 +7852,7 @@ async function renderCommunity(id, query = '') {
       const box = document.getElementById('channelMessages');
       if (!box || !location.hash.includes(id)) return;
       const { data: msgs } = await sb.from('community_channel_messages')
-        .select('id,sender_id,body,pinned_by,created_at')
+        .select('id,sender_id,body,pinned_by,created_at,is_bot')
         .eq('channel_id', activeChannel.id).order('created_at', { ascending: true }).limit(200);
       if (msgs) channelMessages = msgs;
       const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 80;
@@ -7876,6 +7877,7 @@ async function renderCommunity(id, query = '') {
       if (!body) return;
       const { error: sendError } = await sb.from('community_channel_messages').insert({ channel_id: activeChannel.id, sender_id: currentUser.id, body });
       if (sendError) { setSettingsMessage(document.getElementById('channelSendMessage'), `Mesaj gönderilemedi: ${sendError.message}`, true); return; }
+      cemberReplyIfMentioned(body, reply => sb.from('community_channel_messages').insert({ channel_id: activeChannel.id, sender_id: currentUser.id, body: '🤖 ' + reply, is_bot: true }));
       input.value = '';
       setSettingsMessage(document.getElementById('channelSendMessage'), '');
       await reloadChannel();
@@ -8941,6 +8943,27 @@ async function init() {
 const helperPanel = document.getElementById('halkaHelperPanel');
 const helperToggle = document.getElementById('halkaHelperToggle');
 const helperAnswer = document.getElementById('halkaHelperAnswer');
+// ── Çember AI: Pollinations üzerinden gerçek cevap ──
+const CEMBER_PERSONA = `Sen Çember'sin — HALKA adlı Türkçe üretim topluluğunun maskot asistanı. Platformda yazı, çizim, manga, light novel, fotoğraf, video ve müzik paylaşılır; topluluklar, grup sohbetleri, okuma kulüpleri, kolektif dergi sayıları, yazma sprinti, bölüm anketleri ve rozetler var. Türkçe, sıcak ve kısa cevap ver (en fazla 2-3 cümle). Arada bir emoji kullan. Sorulan soru: `;
+const CEMBER_MENTION = /@(çember|cember)/i;
+
+async function cemberAskAI(text) {
+  try {
+    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(CEMBER_PERSONA + text), { signal: AbortSignal.timeout(16000) });
+    if (!r.ok) throw new Error(String(r.status));
+    const reply = (await r.text()).trim().slice(0, 600);
+    return reply || null;
+  } catch { return null; }
+}
+
+// @çember etiketine bot cevabı — gönderenin istemcisi üretir
+async function cemberReplyIfMentioned(body, insertBot) {
+  if (!currentUser || !CEMBER_MENTION.test(body)) return;
+  const q = body.replace(CEMBER_MENTION, '').trim() || 'Selam!';
+  const reply = await cemberAskAI(q);
+  if (reply) insertBot(reply).catch(() => {});
+}
+
 const helperReplies = {
   book: ['Kitap yazmak için + menüsünden Yazı → Kitap’ı seç. Kitap adı, kısa tanıtım, istersen kapak ve ilk bölümünü ekle. **kalın** ve (italik) düğmeleri metni biçimlendirir.', '#/write?kind=book'],
   discover: ['Keşfet’te Tümü, Videolar, Çizimler, Resimler ve Yazılar filtreleri var. Hızlı keşfet görünümünde eserleri kaydırarak gezebilirsin.', '#/section/kesfet'],
@@ -9059,9 +9082,11 @@ function cemberTask() {
     cemberCelebrate('Görev tamam! Bugün de ürettin — zincir güçleniyor. 🔥');
   });
 }
-document.getElementById('halkaHelperForm').addEventListener('submit', event => {
+document.getElementById('halkaHelperForm').addEventListener('submit', async event => {
   event.preventDefault();
-  const question = document.getElementById('halkaHelperInput').value.toLocaleLowerCase('tr-TR');
+  const rawQ = document.getElementById('halkaHelperInput').value.trim();
+  const question = rawQ.toLocaleLowerCase('tr-TR');
+  const keywordReply = () => {
   const key = /müzik|muzik|şarkı|sarki|beste|parça|parca|ses kayıt|ses kayit/.test(question) ? 'music'
     : /topluluk|community|sunucu/.test(question) ? 'community'
     : /sohbet.*(kişiselleştir|kisisellestir|özelleştir|ozellestir|renk|ad|isim)|kişiselleştir|kisisellestir/.test(question) ? 'chatcustom'
@@ -9073,8 +9098,12 @@ document.getElementById('halkaHelperForm').addEventListener('submit', event => {
     : /sohbet|mesaj|grup/.test(question) ? 'chat'
     : /şifre|sifre|güven|guven|hesap/.test(question) ? 'security'
     : /foto|görsel|gorsel|resim|video/.test(question) ? 'image' : 'help';
-  showHelperReply(key);
+  showHelperReply(key); };
   event.currentTarget.reset();
+  if (!rawQ) return;
+  helperAnswer.textContent = '🤖 Çember düşünüyor…';
+  const ai = await cemberAskAI(rawQ);
+  if (ai) { helperAnswer.textContent = ai; } else keywordReply();
 });
 
 // ── Etkileşim paketi yardımcıları ──
