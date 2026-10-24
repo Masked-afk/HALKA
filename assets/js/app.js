@@ -90,10 +90,13 @@ function legalCheckboxes(prefix = 'legal') {
     privacy: '’ni okudum.',
     community: '’nı okudum ve kabul ediyorum.'
   };
-  return Object.entries(LEGAL_LABELS).map(([key, label]) => `<label class="legal-check"><input type="checkbox" name="${prefix}_${key}" required><span><a href="#/legal/${key}" target="_blank" rel="noopener">${label}</a>${statements[key]}</span></label>`).join('');
+  return Object.entries(LEGAL_LABELS).map(([key, label]) => `<label class="legal-check"><input type="checkbox" name="${prefix}_${key}" required><span><a href="#/legal/${key}" target="_blank" rel="noopener">${label}</a>${statements[key]}</span></label>`).join('')
+    + `<label class="legal-check"><input type="checkbox" name="${prefix}_age" required><span><strong>13 yaşından büyüğüm</strong> — yaşımı yanlış beyan edersem hesabım kapatılabilir.</span></label>`;
 }
 function hasLegalConsent(form, prefix = 'legal') {
-  return Boolean(form) && Object.keys(LEGAL_LABELS).every(key => form.querySelector(`[name="${prefix}_${key}"]`)?.checked);
+  return Boolean(form)
+    && Object.keys(LEGAL_LABELS).every(key => form.querySelector(`[name="${prefix}_${key}"]`)?.checked)
+    && !!form.querySelector(`[name="${prefix}_age"]`)?.checked;
 }
 function currentLegalMetadata() {
   return { terms_version: LEGAL_VERSIONS.terms, privacy_version: LEGAL_VERSIONS.privacy, community_rules_version: LEGAL_VERSIONS.community };
@@ -3847,6 +3850,7 @@ function renderLegalPage(type = 'terms') {
     terms: `<div class="eyebrow">Taslak · ${LEGAL_VERSIONS.terms}</div><h1>Kullanıcı Sözleşmesi</h1>
       <p>HALKA; kullanıcıların yazı, kitap, çizim, fotoğraf ve kısa video paylaşabildiği bir topluluk alanıdır. Hesap açarak bu sözleşmeyi kabul etmiş olursun.</p>
       <h2>Hesap ve güvenlik</h2><p>Doğru bilgiler vermeli, hesabının erişim bilgilerini korumalı ve hesabındaki hareketlerden sorumlu olmalısın. Başkasına ait hesapları kullanamaz veya platform güvenliğini aşmaya çalışamazsın.</p>
+      <h2>Yaş sınırı</h2><p>HALKA 13 yaş ve üzeri kullanıcılar içindir. 18 yaşından küçüksen platformu veli/vasi onayıyla kullanmalısın. Yaşını yanlış beyan etmek bu sözleşmenin ihlalidir; tespit edilmesi durumunda hesabın kapatılabilir.</p>
       <h2>İçerik ve haklar</h2><p>Paylaştığın içerik üzerindeki hakların sende kalır. İçeriği HALKA’da gösterebilmemiz ve seçtiğin gizlilik ayarına göre diğer kullanıcılara sunabilmemiz için sınırlı bir yayınlama ve barındırma izni verirsin. Yüklemek için gerekli haklara sahip olduğun içerikleri paylaşmalısın.</p>
       <h2>Yasak içerik ve yaptırımlar</h2><p>Yasa dışı, tehdit edici, taciz edici, başkasının haklarını ihlal eden veya zararlı yazılım içeren içerikler paylaşma. Kurallara aykırı içerik kaldırılabilir; ihlalin niteliğine göre hesabın kısıtlanabilir veya kapatılabilir.</p>
       <h2>Fikri hak ihlali bildirimi (telif şikâyeti)</h2><p>Kendi eserinin izinsiz paylaşıldığını düşünüyorsan <strong>halka.destek1@gmail.com</strong> adresine bildirim gönder. Bildirimde şunlar bulunmalı: (1) ihlal olduğunu düşündüğün içeriğin bağlantısı, (2) hak sahibi olduğunu gösteren bilgi veya açıklama, (3) iletişim adresin. Bildirimler makul süre içinde incelenir; haklı bulunan ihlalde içerik kaldırılır ve tekrarlayan ihlallerde hesap kapatılabilir. İçeriği kaldırılan kullanıcı itirazını aynı adrese iletebilir.</p>
