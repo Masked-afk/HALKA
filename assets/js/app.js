@@ -268,12 +268,12 @@ function levelInfo(score) {
 
 const TRACK_DEFS = [
   { key: 'writing', name: 'Yazı', icon: '🖋️', stages: ['İmza', 'Kalem', 'Muharrir', 'Edebiyatçı', 'Üstat'], need: [1, 10, 50, 100, 250] },
-  { key: 'drawing', name: 'Çizim', icon: '🎨', stages: ['Eskiz', 'Fırça', 'Ressam', 'Galeri', 'Usta'], need: [1, 10, 50, 100, 250] },
+  { key: 'drawing', name: 'Çizim', icon: '🎨', stages: ['Eskiz', 'Fırça', 'Ressam', 'Galeri', 'Başyapıt'], need: [1, 10, 50, 100, 250] },
   { key: 'photo', name: 'Fotoğraf', icon: '📷', stages: ['Kadraj', 'Vizör', 'Fotoğrafçı', 'Sergi', 'Koleksiyoner'], need: [1, 10, 50, 100, 250] },
   { key: 'video', name: 'Video', icon: '🎬', stages: ['Perde', 'Yönetmen', 'Stüdyo', 'Sinemacı', 'Yeşilçam'], need: [1, 10, 50, 100, 250] },
   { key: 'music', name: 'Müzik', icon: '🎵', stages: ['Nota', 'Melodi', 'Besteci', 'Maestro', 'Senfoni'], need: [1, 10, 50, 100, 250] },
   { key: 'likes', name: 'Beğeni', icon: '❤️', stages: ['Kıvılcım', 'Sevilen', 'Gözde', 'İkon', 'Taç'], need: [1, 10, 50, 100, 250] },
-  { key: 'followers', name: 'Takipçi', icon: '👥', stages: ['İlk Halka', 'Cemiyet', 'Merkez', 'Yıldız', 'Diva'], need: [1, 10, 50, 100, 250] },
+  { key: 'followers', name: 'Takipçi', icon: '👥', stages: ['İlk Halka', 'Cemiyet', 'Merkez', 'Yıldız', 'Süperstar'], need: [1, 10, 50, 100, 250] },
   { key: 'bugs', name: 'Katkı', icon: '🔧', stages: ['Dikkatli', 'Kusur Avcısı', 'Bakım Teknisyeni', 'Sistem Doktoru', 'Bakım Efsanesi'], need: [1, 10, 50, 100, 250], secret: true }
 ];
 
@@ -2154,6 +2154,7 @@ async function renderRead(id, query = '') {
   if (currentUser) {
     sb.from('view_history').upsert({ user_id: currentUser.id, post_id: id, viewed_at: new Date().toISOString() }).then(() => {});
     const doingVerb = post.type === 'video' ? 'izliyor' : post.type === 'music' ? 'dinliyor' : post.type === 'drawing' || post.type === 'photo' ? 'inceliyor' : 'okuyor';
+    document.title = `${post.title || 'Eser'} — ${displayName(profile)} · HALKA`;
     setNowDoing(`"${(post.title || 'Bir eser').slice(0, 60)}" ${doingVerb}`);
   }
 
