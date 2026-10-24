@@ -3216,9 +3216,14 @@ async function renderRead(id, query = '') {
     if (!error) { mine ? (postRx.mine.delete(em), postRx.counts[em]--) : (postRx.mine.add(em), postRx.counts[em] = (postRx.counts[em] || 0) + 1); renderPostRx(); }
   });
   app.querySelectorAll('.ch-poll').forEach(b => b.addEventListener('click', async () => {
-    const raw = prompt('Bölüm sonu anketini yaz — seçenekleri virgülle ayır (2-4):');
-    if (!raw) return;
-    const opts = raw.split(/[,;]/).map(s => s.trim()).filter(Boolean).slice(0, 4);
+    const r = await promptModal({ title: '🗳️ Bölüm sonu okur anketi', fields: [
+      { key: 'a', label: 'Seçenek 1', max: 80, placeholder: 'Örn. Kahraman ormana gider' },
+      { key: 'b', label: 'Seçenek 2', max: 80, placeholder: 'Örn. Kaleye döner' },
+      { key: 'c', label: 'Seçenek 3 (isteğe bağlı)', max: 80 },
+      { key: 'd', label: 'Seçenek 4 (isteğe bağlı)', max: 80 }
+    ] });
+    if (!r) return;
+    const opts = [r.a, r.b, r.c, r.d].map(s => (s || '').trim()).filter(Boolean);
     if (opts.length < 2) return alert('En az 2 seçenek gerekli.');
     const { error } = await sb.from('chapter_polls').insert({ chapter_id: b.dataset.ch, post_id: id, options: opts });
     if (error) return alert('Anket açılamadı: ' + error.message);
@@ -9423,6 +9428,33 @@ if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }
 
+// Temalı soru penceresi: prompt() yerine HALKA modalı.
+function promptModal({ title, fields }) {
+  return new Promise(res => {
+    const ov = document.createElement('div');
+    ov.className = 'badge-modal-backdrop';
+    ov.innerHTML = `<div class="card badge-modal" style="max-width:420px;text-align:left">
+      <h3 style="margin:0 0 12px">${esc(title)}</h3>
+      ${fields.map(f => `<div class="field"><label>${esc(f.label)}</label>${f.options
+        ? `<select name="${f.key}">${f.options.map(o => `<option value="${esc(o.v)}">${esc(o.t)}</option>`).join('')}</select>`
+        : `<input name="${f.key}" maxlength="${f.max || 200}" placeholder="${esc(f.placeholder || '')}">`}</div>`).join('')}
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+        <button class="btn ghost small pm-cancel" type="button">İptal</button>
+        <button class="btn primary small pm-ok" type="button">Tamam</button>
+      </div></div>`;
+    document.body.appendChild(ov);
+    const done = v => { ov.remove(); res(v); };
+    ov.querySelector('.pm-cancel').addEventListener('click', () => done(null));
+    ov.addEventListener('click', e => { if (e.target === ov) done(null); });
+    ov.querySelector('.pm-ok').addEventListener('click', () => {
+      const out = {};
+      ov.querySelectorAll('[name]').forEach(el => { out[el.name] = el.value; });
+      done(out);
+    });
+    ov.querySelector('input,select')?.focus();
+  });
+}
+
 // ── Kolektif dergi/sayı ──
 async function renderIssues() {
   app.innerHTML = loadingBlock('Dergiler yükleniyor…');
@@ -9445,10 +9477,12 @@ async function renderIssues() {
     ${(mineRes.data || []).length ? `<section class="card"><h3>📝 Taslak sayıların</h3>${mineRes.data.map(row).join('')}</section>` : ''}
     <section class="card">${issues.length ? issues.map(row).join('') : '<div class="empty">Henüz yayınlanmış sayı yok — ilkini sen kur.</div>'}</section>`;
   document.getElementById('issueCreateBtn')?.addEventListener('click', async () => {
-    const title = (prompt('Sayı başlığı:') || '').trim();
-    if (!title) return;
-    const description = (prompt('Kısa tanıtım (isteğe bağlı):') || '').trim();
-    const { data, error } = await sb.from('joint_issues').insert({ creator_id: currentUser.id, title, description }).select().single();
+    const r = await promptModal({ title: '📖 Yeni kolektif sayı', fields: [
+      { key: 'title', label: 'Sayı başlığı', max: 120, placeholder: 'Örn. Ekim Sayısı' },
+      { key: 'desc', label: 'Kısa tanıtım (isteğe bağlı)', max: 300, placeholder: 'Bu sayıda ne var?' }
+    ] });
+    if (!r || !r.title.trim()) return;
+    const { data, error } = await sb.from('joint_issues').insert({ creator_id: currentUser.id, title: r.title.trim(), description: r.desc.trim() }).select().single();
     if (error) return alert('Sayı kurulamadı: ' + error.message);
     location.hash = '#/dergi/' + encodeURIComponent(data.id);
   });
@@ -9506,9 +9540,11 @@ async function renderIssue(id) {
   document.getElementById('issueSubmitBtn')?.addEventListener('click', async () => {
     const { data: mine } = await sb.from('posts').select('id,title').eq('author_id', currentUser.id).eq('is_draft', false).order('created_at', { ascending: false }).limit(30);
     if (!(mine || []).length) return alert('Önerebileceğin yayınlanmış eserin yok.');
-    const menu = mine.map((p, i) => `${i + 1}) ${p.title || 'Başlıksız'}`).join('\n');
-    const pick = parseInt(prompt(`Hangi eserini öneriyorsun?\n${menu}\n\nNumara gir:`), 10);
-    const chosen = mine[pick - 1];
+    const r = await promptModal({ title: '✍️ Eserini öner', fields: [
+      { key: 'pid', label: 'Eserin', options: mine.map(p => ({ v: p.id, t: p.title || 'Başlıksız' })) }
+    ] });
+    if (!r) return;
+    const chosen = mine.find(p => p.id === r.pid);
     if (!chosen) return;
     const { error: e2 } = await sb.from('issue_posts').insert({ issue_id: id, post_id: chosen.id, added_by: currentUser.id, position: accepted.length });
     if (e2) return alert('Önerilemedi: ' + (e2.message.includes('duplicate') ? 'Bu eser zaten sayıda.' : e2.message));
