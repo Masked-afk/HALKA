@@ -74,6 +74,7 @@ let currentAuthMode = 'signup';
 let feedSort = 'new';
 let feedSearch = '';
 let feedCritique = false;
+let feedForYou = false;
 let chatRefreshTimer = null;
 
 // Supabase'te kurulumu tamamlanan sağlayıcıları buraya ekle: 'google','github','facebook','twitter','apple','discord'
@@ -592,6 +593,7 @@ function renderHome() {
         <button class="btn ghost" id="refreshBtn">Yenile ↻</button>
         <button class="btn ghost" id="randomPostBtn" title="Rastgele bir eser aç">🎲 Şansıma</button>
         <button class="chip ${feedCritique ? 'on' : ''}" id="critiqueChip" type="button">🎯 Eleştiri bekleyenler</button>
+        <button class="chip ${feedForYou ? 'on' : ''}" id="forYouChip" type="button" title="Beğenilerine, yorumlarına ve kayıtlarına göre sırala">✨ Senin için</button>
       </div>
       <div id="feed"><div class="loading"><div class="spinner-container"><div class="spinner-rings"></div><span>Eserler yükleniyor…</span></div></div></div>
     </section>
@@ -605,6 +607,11 @@ function renderHome() {
   document.getElementById('critiqueChip').addEventListener('click', () => {
     feedCritique = !feedCritique;
     document.getElementById('critiqueChip').classList.toggle('on', feedCritique);
+    loadFeed();
+  });
+  document.getElementById('forYouChip')?.addEventListener('click', () => {
+    feedForYou = !feedForYou;
+    document.getElementById('forYouChip').classList.toggle('on', feedForYou);
     loadFeed();
   });
   document.getElementById('randomPostBtn').addEventListener('click', async () => {
@@ -987,8 +994,9 @@ async function loadFeed(append = false) {
     if (term) query = query.or(`title.ilike.%${term}%,description.ilike.%${term}%`);
   }
   if (feedCritique) query = query.eq('critique_wanted', true);
-  const { data: posts, error } = await query;
+  let { data: posts, error } = await query;
   feedLoading = false;
+  if (feedForYou && (posts || []).length) posts = await personalizePosts(posts);
   if (error) {
     feed.innerHTML = `<div class="empty">Eserler yüklenemedi.<br><span class="small">${esc(error.message)}</span></div>`;
     return;
@@ -1740,6 +1748,11 @@ function renderWrite() {
           <div class="small">"Sadece arkadaşlarım" seçersen eser akışta ve aramada yalnızca karşılıklı arkadaşlarına görünür.</div>
         </div>
         <div class="field">
+          <label for="inspiredBy">İlham kaynağı <span class="small">(isteğe bağlı)</span></label>
+          <input id="inspiredBy" name="inspired_by" maxlength="200" placeholder="Eser linki yapıştır — #/read/…">
+          <div class="small">Bir eserden ilham aldıysan linkini bırak; orijinal sayfada "bundan doğanlar" olarak görünürsün.</div>
+        </div>
+        <div class="field">
           <label for="tags">Hashtag’ler</label>
           <input id="tags" name="tags" maxlength="160" list="hashtagSuggestions" placeholder="fantastik, günlük, kitap">
           <datalist id="hashtagSuggestions">${categories.filter(tag => tag !== 'Diğer').map(tag => `<option value="${esc(tagSlug(tag))}">`).join('')}</datalist>
@@ -1968,6 +1981,7 @@ function renderWrite() {
         beta_wanted: form.get('beta_wanted') === 'on',
         visibility: form.get('visibility') === 'friends' ? 'friends' : 'public',
         is_draft: isDraft,
+        inspired_by: parsePostRef(form.get('inspired_by')),
         theme_id: new URLSearchParams(location.hash.split('?')[1] || '').get('theme') || null
       };
       if (coverPath) postValues.cover_path = coverPath;
@@ -2243,6 +2257,82 @@ async function renderRead(id, query = '') {
   const canReportPost = !!currentUser && !isOwner;
 
   const commentsByParent = new Map();
+  // ── Etkileşim paketi verileri: anketler, tepkiler, sesli yorum, ilham zinciri ──
+  const pollByCh = {}, votesByPoll = {};
+  if (chapterIds.length) {
+    const { data: polls } = await sb.from('chapter_polls').select('*').in('chapter_id', chapterIds);
+    (polls || []).forEach(p => { pollByCh[p.chapter_id] = p; });
+    const pollIds = (polls || []).map(p => p.id);
+    if (pollIds.length) {
+      const { data: votes } = await sb.from('chapter_poll_votes').select('poll_id,option_index,user_id').in('poll_id', pollIds);
+      (votes || []).forEach(v => {
+        const e = votesByPoll[v.poll_id] = votesByPoll[v.poll_id] || { counts: {}, mine: null };
+        e.counts[v.option_index] = (e.counts[v.option_index] || 0) + 1;
+        if (currentUser && v.user_id === currentUser.id) e.mine = v.option_index;
+      });
+    }
+  }
+  const postRx = { counts: {}, mine: new Set() };
+  {
+    const { data: rx } = await sb.from('post_reactions').select('emoji,user_id').eq('post_id', id);
+    (rx || []).forEach(r => { postRx.counts[r.emoji] = (postRx.counts[r.emoji] || 0) + 1; if (currentUser && r.user_id === currentUser.id) postRx.mine.add(r.emoji); });
+  }
+  const commentRx = {}, commentRxMine = {};
+  {
+    const cIds = comments.map(c => c.id);
+    if (cIds.length) {
+      const { data: crx } = await sb.from('comment_reactions').select('comment_id,emoji,user_id').in('comment_id', cIds);
+      (crx || []).forEach(r => {
+        (commentRx[r.comment_id] = commentRx[r.comment_id] || {})[r.emoji] = (commentRx[r.comment_id][r.emoji] || 0) + 1;
+        if (currentUser && r.user_id === currentUser.id) (commentRxMine[r.comment_id] = commentRxMine[r.comment_id] || new Set()).add(r.emoji);
+      });
+    }
+  }
+  const audioUrlMap = {};
+  comments.filter(c => c.audio_path).forEach(c => { audioUrlMap[c.audio_path] = sb.storage.from('post-media').getPublicUrl(c.audio_path).data.publicUrl; });
+  let inspiredSrc = null, derivatives = [];
+  if (post.inspired_by) {
+    const { data: src } = await sb.from('posts').select('id,title,author_id').eq('id', post.inspired_by).maybeSingle();
+    if (src) {
+      const { data: sp } = await sb.from('profiles').select('id,username,display_name').eq('id', src.author_id).maybeSingle();
+      inspiredSrc = { ...src, name: displayName(sp) };
+    }
+  }
+  {
+    const { data: dv } = await sb.from('posts').select('id,title,author_id').eq('inspired_by', id).eq('is_draft', false).order('created_at', { ascending: false }).limit(8);
+    if ((dv || []).length) {
+      const dIds = [...new Set(dv.map(d => d.author_id))];
+      const { data: dps } = await sb.from('profiles').select('id,username,display_name').in('id', dIds);
+      const dpm = Object.fromEntries((dps || []).map(p => [p.id, p]));
+      derivatives = dv.map(d => ({ ...d, name: displayName(dpm[d.author_id]) }));
+    }
+  }
+  const inspiredHTML = `${inspiredSrc ? `<div class="inspired-src small">💡 İlham kaynağı: <a href="#/read/${encodeURIComponent(inspiredSrc.id)}"><strong>${esc(inspiredSrc.title || 'Eser')}</strong></a> — ${esc(inspiredSrc.name)}</div>` : ''}${derivatives.length ? `<div class="derivatives"><div class="small" style="margin-bottom:6px">🌱 Bu eserden doğanlar:</div>${derivatives.map(d => `<a class="deriv-chip" href="#/read/${encodeURIComponent(d.id)}">${esc(d.title || 'Eser')} <span>· ${esc(d.name)}</span></a>`).join('')}</div>` : ''}`;
+  const chapterPollHTML = ch => {
+    const poll = pollByCh[ch.id];
+    if (!poll) return '';
+    const v = votesByPoll[poll.id] || { counts: {}, mine: null };
+    const total = Object.values(v.counts).reduce((a, b) => a + b, 0);
+    const opts = Array.isArray(poll.options) ? poll.options : [];
+    const closed = !!poll.closed_at;
+    const winIdx = closed && total ? Object.keys(v.counts).sort((a, b) => (v.counts[b] || 0) - (v.counts[a] || 0))[0] : null;
+    return `<div class="chapter-poll">
+      <div class="small" style="margin-bottom:6px">🗳️ <strong>Okur yönlendirmesi</strong>${closed ? ' — oylama kapandı' : ` · ${total} oy`}</div>
+      ${opts.map((o, oi) => {
+        const n = v.counts[oi] || 0;
+        const pct = total ? Math.round(n / total * 100) : 0;
+        const win = closed && String(oi) === String(winIdx);
+        return `<button class="poll-opt${v.mine === oi ? ' on' : ''}${win ? ' win' : ''}" data-poll="${esc(poll.id)}" data-idx="${oi}" type="button" ${closed ? 'disabled' : ''}>
+          <span class="poll-opt-fill" style="width:${pct}%"></span>
+          <span class="poll-opt-label">${esc(String(o))}</span>
+          <span class="poll-opt-count">${n}${win ? ' ✓' : ''}</span>
+        </button>`;
+      }).join('')}
+      ${isOwner && !closed ? `<button class="btn ghost small poll-close" data-poll="${esc(poll.id)}" type="button">Anketi kapat</button>` : ''}
+      ${!currentUser && !closed ? '<div class="small" style="margin-top:6px">Oy vermek için giriş yap.</div>' : ''}
+    </div>`;
+  };
+
   const commentsByChapter = new Map();
   const paragraphCounts = {};
   const commentsByParagraph = new Map();
@@ -2276,7 +2366,8 @@ async function renderRead(id, query = '') {
           <span class="comment-author">${esc(displayName(cp, 'Anonim'))}</span>
           <span class="comment-date">${esc(formatDate(c.created_at))}</span>
         </div>
-        <div class="comment-body">${c.media_second !== null && c.media_second !== undefined ? `<button class="comment-ts" type="button" data-sec="${c.media_second}" title="Medyada bu ana git">⏱️ ${Math.floor(c.media_second / 60)}:${String(c.media_second % 60).padStart(2, '0')}</button> ` : ''}${esc(c.body)}</div>
+        <div class="comment-body">${c.media_second !== null && c.media_second !== undefined ? `<button class="comment-ts" type="button" data-sec="${c.media_second}" title="Medyada bu ana git">⏱️ ${Math.floor(c.media_second / 60)}:${String(c.media_second % 60).padStart(2, '0')}</button> ` : ''}${esc(c.body)}${c.audio_path && audioUrlMap[c.audio_path] ? `<audio class="comment-voice" src="${esc(audioUrlMap[c.audio_path])}" controls preload="metadata"></audio>` : ''}</div>
+        <div class="comment-rx">${REACTIONS.slice(0, 3).map(e => `<button class="react-chip${commentRxMine[c.id]?.has(e) ? ' on' : ''}" data-cid="${esc(String(c.id))}" data-emoji="${e}" type="button">${e} <span>${(commentRx[c.id] || {})[e] || 0}</span></button>`).join('')}</div>
         <div class="comment-tools">
           <button class="comment-like ${commentLiked ? 'liked' : ''}" data-comment-id="${esc(c.id)}" type="button" aria-pressed="${commentLiked}" aria-label="Yorumu beğen">
             <span class="heart">${commentLiked ? '❤️' : '🤍'}</span><span class="comment-like-count">${commentLikeCounts[c.id] || 0}</span>
@@ -2362,6 +2453,20 @@ async function renderRead(id, query = '') {
         submit.disabled = false;
       });
     });
+    scope.querySelectorAll('.comment-rx .react-chip').forEach(b => b.addEventListener('click', async () => {
+      if (!currentUser) { location.hash = '#/auth?signup'; return; }
+      const cid = b.dataset.cid, em = b.dataset.emoji;
+      const mine = commentRxMine[cid]?.has(em);
+      const { error } = mine
+        ? await sb.from('comment_reactions').delete().eq('comment_id', cid).eq('user_id', currentUser.id).eq('emoji', em)
+        : await sb.from('comment_reactions').insert({ comment_id: cid, user_id: currentUser.id, emoji: em });
+      if (error) return;
+      if (mine) { commentRxMine[cid].delete(em); commentRx[cid][em]--; }
+      else { (commentRxMine[cid] = commentRxMine[cid] || new Set()).add(em); (commentRx[cid] = commentRx[cid] || {})[em] = (commentRx[cid][em] || 0) + 1; }
+      b.classList.toggle('on', !mine);
+      b.innerHTML = `${em} <span>${commentRx[cid][em] || 0}</span>`;
+    }));
+    wireVoiceButtons(scope);
     scope.querySelectorAll('.comment-like').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!currentUser) { location.hash = '#/auth'; return; }
@@ -2426,6 +2531,7 @@ async function renderRead(id, query = '') {
   app.innerHTML = `
     <p><a href="#/">← Eserlere dön</a></p>
     ${post.is_draft ? `<div style="background:var(--card,#181714);border:1px dashed var(--line);border-radius:12px;padding:10px 14px;margin-bottom:12px" class="small">📝 <strong>Taslak</strong> — bu eseri şu an yalnızca sen görüyorsun. Hazır olunca aşağıdan yayınla.</div>` : ''}
+    ${inspiredHTML}
     <section class="hero">
       <div class="eyebrow">${esc(quickTypeLabel(post))}</div>
       <h1>${esc(post.title || 'Başlıksız eser')}</h1>
@@ -2473,6 +2579,8 @@ async function renderRead(id, query = '') {
         <span class="heart">${userLiked ? '❤️' : '🤍'}</span>
         <span class="like-count">${likeCount}</span>
       </button>
+      <div class="post-reactions" id="postReactions"></div>
+      <button class="btn ghost small" id="shareCardBtn" type="button" title="Paylaşım kartı indir">🖼️ Kart</button>
         ${currentUser ? `<a class="btn ghost small" href="#/chat?share=${encodeURIComponent(post.id)}">Sohbette paylaş</a>` : ''}
         ${currentUser ? '<button class="btn ghost small" id="collectionBtn" type="button">📚 Koleksiyona ekle</button>' : ''}
         ${(!post.type || post.type === 'writing') && (chapters || []).some(c => c.body?.trim()) && 'speechSynthesis' in window ? '<button class="btn ghost small" id="ttsBtn" type="button" title="Eseri sesli oku">🔊 Dinle</button>' : ''}
@@ -2481,6 +2589,7 @@ async function renderRead(id, query = '') {
         ${isOwner ? '<button class="btn ghost small" id="newVersionBtn" type="button">📜 Yeni versiyon</button>' : ''}
         ${isOwner && (post.media_url || post.kind === 'manga') ? `<button class="btn ghost small" id="downloadToggleBtn" type="button" title="Eserin indirilip indirilemeyeceğini seç">⬇️ İndirme: ${post.allow_download ? 'açık' : 'kapalı'}</button>` : ''}
         ${isOwner ? '<button class="btn ghost small" id="readStatsBtn" type="button" title="Okurlarının anonim okuma özetleri">📊 Okuma istatistikleri</button>' : ''}
+        ${isOwner ? '<button class="btn ghost small" id="heatBtn" type="button" title="Okurlar paragraflarda ne kadar durdu — ısı haritası">🔥 Okur ısısı</button>' : ''}
         ${isOwner && (!post.type || post.type === 'writing') ? `<button class="btn ghost small" id="contToggleBtn" type="button" title="Okurların devam önermesine izin ver/kes">✍️ Devam: ${post.allow_continuation ? 'açık' : 'kapalı'}</button>` : ''}
         ${isOwner ? `<button class="btn ghost small" id="betaToggleBtn" type="button" title="Gönüllü beta okuyucu eşleşmesi aç/kapat">🔬 Beta: ${post.beta_wanted ? 'açık' : 'kapalı'}</button>` : ''}
         ${isOwner && post.kind === 'manga' && (chapters || []).some(c => c.media_url) ? '<button class="btn ghost small" id="mangaCoverBtn" type="button" title="Bir sayfadan kapak üret">🖼️ Kapak üret</button>' : ''}
@@ -2532,18 +2641,20 @@ async function renderRead(id, query = '') {
         <h3>${esc(ch.title || 'Bölüm')} ${ch.is_draft ? '<span class="chip small" title="Yalnızca sen görüyorsun">📝 Taslak</span>' : ''}</h3>
         ${isOwner && isChapteredKind(post.kind) ? `<div class="page-admin" style="display:flex;gap:6px;margin:4px 0 8px">
           ${ch.is_draft ? `<button class="btn primary small ch-publish" data-ch="${esc(ch.id)}" type="button" title="Bölümü okurlara aç">📢 Yayınla</button>` : ''}
+          ${!pollByCh[ch.id] ? `<button class="btn ghost small ch-poll" data-ch="${esc(ch.id)}" type="button" title="Bölüm sonuna okur anketi ekle">🗳️</button>` : ''}
           <button class="btn ghost small ch-move" data-ch="${esc(ch.id)}" data-dir="-1" type="button" title="Yukarı taşı" ${i === 0 ? 'disabled' : ''}>↑</button>
           <button class="btn ghost small ch-move" data-ch="${esc(ch.id)}" data-dir="1" type="button" title="Aşağı taşı" ${i === (chapters || []).length - 1 ? 'disabled' : ''}>↓</button>
           <button class="btn ghost small ch-del" data-ch="${esc(ch.id)}" data-title="${esc(ch.title || 'Sayfa')}" type="button" title="Sil">🗑</button>
         </div>` : ''}
         ${ch.media_url ? `<img class="manga-page-img" src="${esc(ch.media_url)}" alt="${esc(ch.title || 'Manga sayfası')}" loading="lazy"${post.allow_download ? '' : ' oncontextmenu="return false" draggable="false"'}>` : ''}
         ${ch.body ? `<div class="chapter-body">${renderParagraphs(ch.body, ch.id, paragraphCounts[ch.id] || {}, post.kind)}</div>` : ''}
+        ${chapterPollHTML(ch)}
         <div class="chapter-comments">
           <button class="ch-like ${myChapterLikes.has(ch.id) ? 'liked' : ''}" data-ch="${esc(ch.id)}" type="button" title="Bu bölümü beğen">${myChapterLikes.has(ch.id) ? '❤️' : '🤍'} <span>${chapterLikeCounts[ch.id] || 0}</span></button>
           <button class="chapter-comments-toggle" data-chapter="${esc(ch.id)}" type="button">💬 Bölüm yorumları (<span>${chComments.length}</span>)</button>
           <div class="chapter-comments-panel" hidden>
             <div class="chapter-comments-list">${chComments.length ? chComments.map(c => renderComment(c)).join('') : '<div class="empty small">Bu bölüme henüz yorum yok.</div>'}</div>
-            ${currentUser ? `<form class="chapter-comment-form" data-chapter="${esc(ch.id)}"><textarea maxlength="1000" placeholder="Bu bölüme yorum yaz…" required></textarea><button class="btn small" type="submit">Gönder</button></form>` : ''}
+            ${currentUser ? `<form class="chapter-comment-form" data-chapter="${esc(ch.id)}"><textarea maxlength="1000" placeholder="Bu bölüme yorum yaz…" required></textarea><button class="btn ghost small comment-voice-btn" type="button" title="Sesli yorum kaydet">🎙️</button><button class="btn small" type="submit">Gönder</button></form>` : ''}
           </div>
         </div>
       </section>`;
@@ -2607,6 +2718,7 @@ async function renderRead(id, query = '') {
           <textarea id="commentBody" placeholder="Yorumunu yaz…" required maxlength="1000"></textarea>
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button class="btn primary" type="submit">Yorumu gönder</button>
+            <button class="btn ghost small comment-voice-btn" type="button" title="Sesli yorum kaydet">🎙️</button>
             ${['music','video'].includes(post.type) && post.media_url ? `<button class="btn ghost small" id="timestampBtn" type="button">⏱️ Bu anı işaretle</button><span class="small" id="timestampHint"></span>` : ''}
           </div>
         </form>
@@ -2721,10 +2833,14 @@ async function renderRead(id, query = '') {
     button.disabled = true;
     const { data, error: cErr } = await sb.from('comments').insert({
       post_id: id, author_id: currentUser.id, body,
-      media_second: pendingTimestamp
+      media_second: pendingTimestamp,
+      audio_path: form.dataset.audioPath || null,
+      audio_seconds: Number(form.dataset.audioSeconds) || null
     }).select('*').single();
     button.disabled = false;
     if (cErr) { alert('Yorum eklenemedi: ' + friendlyWriteError(cErr.message)); return; }
+    delete form.dataset.audioPath; delete form.dataset.audioSeconds;
+    form.querySelector('.voice-attached')?.remove();
     form.reset();
     pendingTimestamp = null;
     const hint = document.getElementById('timestampHint');
@@ -2760,10 +2876,14 @@ async function renderRead(id, query = '') {
       const submitBtn = form.querySelector('button[type="submit"]');
       submitBtn.disabled = true;
       const { data, error: cErr } = await sb.from('comments').insert({
-        post_id: id, author_id: currentUser.id, chapter_id: form.dataset.chapter, body
+        post_id: id, author_id: currentUser.id, chapter_id: form.dataset.chapter, body,
+        audio_path: form.dataset.audioPath || null,
+        audio_seconds: Number(form.dataset.audioSeconds) || null
       }).select('*').single();
       submitBtn.disabled = false;
       if (cErr) { alert('Yorum eklenemedi: ' + friendlyWriteError(cErr.message)); return; }
+      delete form.dataset.audioPath; delete form.dataset.audioSeconds;
+      form.querySelector('.voice-attached')?.remove();
       textarea.value = '';
       comments.push(data);
       const chapterKey = form.dataset.chapter;
@@ -3195,6 +3315,44 @@ async function renderRead(id, query = '') {
     btn.classList.toggle('liked', !liked);
     btn.innerHTML = `${liked ? '🤍' : '❤️'} <span>${chapterLikeCounts[chId]}</span>`;
   }));
+
+  // ── Etkileşim paketi bağlama ──
+  document.getElementById('shareCardBtn')?.addEventListener('click', () => makeShareCard(post, displayName(profile)));
+  const rxBox = document.getElementById('postReactions');
+  const renderPostRx = () => { if (rxBox) rxBox.innerHTML = REACTIONS.map(e => `<button class="react-chip${postRx.mine.has(e) ? ' on' : ''}" data-emoji="${e}" type="button">${e} <span>${postRx.counts[e] || 0}</span></button>`).join(''); };
+  renderPostRx();
+  rxBox?.addEventListener('click', async e => {
+    const b = e.target.closest('.react-chip'); if (!b) return;
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    const em = b.dataset.emoji, mine = postRx.mine.has(em);
+    const { error } = mine
+      ? await sb.from('post_reactions').delete().eq('post_id', id).eq('user_id', currentUser.id).eq('emoji', em)
+      : await sb.from('post_reactions').insert({ post_id: id, user_id: currentUser.id, emoji: em });
+    if (!error) { mine ? (postRx.mine.delete(em), postRx.counts[em]--) : (postRx.mine.add(em), postRx.counts[em] = (postRx.counts[em] || 0) + 1); renderPostRx(); }
+  });
+  app.querySelectorAll('.ch-poll').forEach(b => b.addEventListener('click', async () => {
+    const raw = prompt('Bölüm sonu anketini yaz — seçenekleri virgülle ayır (2-4):');
+    if (!raw) return;
+    const opts = raw.split(/[,;]/).map(s => s.trim()).filter(Boolean).slice(0, 4);
+    if (opts.length < 2) return alert('En az 2 seçenek gerekli.');
+    const { error } = await sb.from('chapter_polls').insert({ chapter_id: b.dataset.ch, post_id: id, options: opts });
+    if (error) return alert('Anket açılamadı: ' + error.message);
+    renderRead(id);
+  }));
+  app.querySelectorAll('.poll-opt').forEach(b => b.addEventListener('click', async () => {
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    const { error } = await sb.from('chapter_poll_votes').upsert({ poll_id: b.dataset.poll, user_id: currentUser.id, option_index: Number(b.dataset.idx) });
+    if (error) return alert('Oy kaydedilemedi: ' + error.message);
+    renderRead(id);
+  }));
+  app.querySelectorAll('.poll-close').forEach(b => b.addEventListener('click', async () => {
+    const { error } = await sb.from('chapter_polls').update({ closed_at: new Date().toISOString() }).eq('id', b.dataset.poll);
+    if (error) return alert('Kapatılamadı: ' + error.message);
+    renderRead(id);
+  }));
+  document.getElementById('heatBtn')?.addEventListener('click', () => toggleHeatMap(id));
+  initDwellTracking(id);
+  wireVoiceButtons(app);
 
   // Manga okuma modu: dikey akış / tek sayfa / sağdan sola
   const modeBar = document.getElementById('mangaModeBar');
@@ -6266,7 +6424,7 @@ const MEDIA_CREATE = {
 const IMAGE_EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
 const VIDEO_EXT = { 'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov' };
 
-async function publishMediaPost({ type, file, mime, title, tags, description, pen_name, critique_wanted, allow_download, is_draft, visibility }) {
+async function publishMediaPost({ type, file, mime, title, tags, description, pen_name, critique_wanted, allow_download, is_draft, visibility, inspired_by }) {
   const cfg = MEDIA_CREATE[type];
   mime = String(mime || '').split(';')[0].trim();
   if (/^image\//.test(mime)) {
@@ -6282,7 +6440,8 @@ async function publishMediaPost({ type, file, mime, title, tags, description, pe
     author_id: currentUser.id, title, description, tags,
     category: tags[0] || 'Diğer', type, kind: type, media_url: mediaUrl,
     pen_name: pen_name || null, critique_wanted: !!critique_wanted, allow_download: !!allow_download,
-    is_draft: !!is_draft, visibility: visibility === 'friends' ? 'friends' : 'public'
+    is_draft: !!is_draft, visibility: visibility === 'friends' ? 'friends' : 'public',
+    inspired_by: inspired_by || null
   }).select().single();
   if (error) { await sb.storage.from('post-media').remove([path]); throw new Error('Eser oluşturulamadı: ' + error.message); }
   return post;
@@ -6295,6 +6454,7 @@ function mediaPostFormHTML(idPrefix) {
     <div class="field" style="display:flex;align-items:center;gap:8px"><input id="${idPrefix}Critique" name="critique_wanted" type="checkbox" style="width:auto"><label for="${idPrefix}Critique" style="margin:0">🎯 Bu esere eleştiri istiyorum</label></div>
     <div class="field" style="display:flex;align-items:center;gap:8px"><input id="${idPrefix}Download" name="allow_download" type="checkbox" style="width:auto"><label for="${idPrefix}Download" style="margin:0">⬇️ Bu eserin indirilmesine izin ver</label></div>
     <div class="field"><label for="${idPrefix}Audience">Kimler görebilir?</label><select id="${idPrefix}Audience" name="visibility"><option value="public">🌍 Herkes</option><option value="friends">🔒 Sadece arkadaşlarım</option></select></div>
+    <div class="field"><label for="${idPrefix}Inspired">İlham kaynağı (isteğe bağlı)</label><input id="${idPrefix}Inspired" name="inspired_by" maxlength="200" placeholder="Eser linki yapıştır — #/read/…"></div>
     <div class="field"><label for="${idPrefix}Tags">Hashtag'ler</label><input id="${idPrefix}Tags" name="tags" maxlength="160" placeholder="çizim, portre"><div class="small">Virgül veya boşlukla ayır; en fazla 5 hashtag.</div><div id="${idPrefix}TagPreview" class="post-tags" aria-live="polite"></div></div>
     <div class="field"><label for="${idPrefix}Desc">Kısa tanıtım</label><textarea id="${idPrefix}Desc" name="description" maxlength="1200" placeholder="Eserin hakkında birkaç cümle…"></textarea></div>`;
 }
@@ -6726,7 +6886,8 @@ function renderCreateMedia(type, mode) {
         critique_wanted: form.get('critique_wanted') === 'on',
         allow_download: form.get('allow_download') === 'on',
         visibility: form.get('visibility'),
-        is_draft: isDraft });
+        is_draft: isDraft,
+        inspired_by: parsePostRef(form.get('inspired_by')) });
       stopCameraStream();
       clearDraft();
       location.hash = '#/read/' + encodeURIComponent(post.id);
@@ -8885,6 +9046,192 @@ document.getElementById('halkaHelperForm').addEventListener('submit', event => {
   showHelperReply(key);
   event.currentTarget.reset();
 });
+
+// ── Etkileşim paketi yardımcıları ──
+const REACTIONS = ['🔥', '👏', '😂', '😢', '😮'];
+
+function parsePostRef(v) {
+  const m = String(v || '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return m ? m[0] : null;
+}
+
+async function makeShareCard(post, author) {
+  const cv = document.createElement('canvas'); cv.width = 1080; cv.height = 1350;
+  const x = cv.getContext('2d');
+  const g = x.createLinearGradient(0, 0, 0, 1350);
+  g.addColorStop(0, '#171512'); g.addColorStop(1, '#2e2415');
+  x.fillStyle = g; x.fillRect(0, 0, 1080, 1350);
+  x.strokeStyle = '#d9b978'; x.lineWidth = 26;
+  x.beginPath(); x.arc(540, 330, 170, 0.5, 5.3); x.stroke();
+  x.strokeStyle = 'rgba(217,185,120,.35)'; x.lineWidth = 10;
+  x.beginPath(); x.arc(540, 330, 210, 0.3, 6.0); x.stroke();
+  const wrap = (t, maxW) => {
+    const out = []; let cur = '';
+    String(t).split(/\s+/).forEach(w => {
+      const s = cur ? cur + ' ' + w : w;
+      if (x.measureText(s).width > maxW && cur) { out.push(cur); cur = w; } else cur = s;
+    });
+    if (cur) out.push(cur);
+    return out;
+  };
+  x.textAlign = 'center';
+  x.fillStyle = '#d9b978'; x.font = '600 34px Fredoka, sans-serif';
+  x.fillText((quickTypeLabel(post) || 'ESER').toUpperCase(), 540, 600);
+  x.fillStyle = '#f5efe2'; x.font = '700 72px Fredoka, sans-serif';
+  wrap(post.title || 'Başlıksız eser', 880).slice(0, 4).forEach((l, i) => x.fillText(l, 540, 700 + i * 86));
+  x.fillStyle = '#b8ad97'; x.font = '400 40px Fredoka, sans-serif';
+  x.fillText(author || 'Halka yazarı', 540, 1100);
+  x.fillStyle = '#d9b978'; x.font = '700 38px Fredoka, sans-serif';
+  x.fillText('halka-sosyal.web.app', 540, 1240);
+  cv.toBlob(b => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(b); a.download = `halka-${post.id}.png`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }, 'image/png');
+}
+
+async function personalizePosts(posts) {
+  if (!currentUser || !posts.length) return posts;
+  try {
+    const [{ data: lk }, { data: cm }, { data: sv }] = await Promise.all([
+      sb.from('likes').select('post_id').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(150),
+      sb.from('comments').select('post_id').eq('author_id', currentUser.id).limit(80),
+      sb.from('saved_posts').select('post_id').eq('user_id', currentUser.id).limit(80)]);
+    const ids = [...new Set([...(lk || []), ...(cm || []), ...(sv || [])].map(r => r.post_id))];
+    if (!ids.length) return posts;
+    const { data: ref } = await sb.from('posts').select('id,author_id,kind,tags').in('id', ids);
+    const wa = {}, wk = {}, wt = {};
+    (ref || []).forEach(p => {
+      wa[p.author_id] = (wa[p.author_id] || 0) + 1;
+      wk[p.kind] = (wk[p.kind] || 0) + 1;
+      (p.tags || []).forEach(t => { wt[t] = (wt[t] || 0) + 1; });
+    });
+    const now = Date.now();
+    const sc = p => 3 * (wa[p.author_id] || 0) + 2 * (wk[p.kind] || 0)
+      + (p.tags || []).reduce((s, t) => s + (wt[t] || 0), 0)
+      + 1 / (1 + (now - new Date(p.created_at)) / 864e5);
+    return [...posts].sort((a, b) => sc(b) - sc(a));
+  } catch { return posts; }
+}
+
+// Paragraf ısı haritası: görünürde kalan her paragrafın süresini biriktirir,
+// bump_dwells RPC ile toplu yazar.
+let dwellSession = null;
+function initDwellTracking(postId) {
+  if (dwellSession) { dwellSession.cleanup(); dwellSession = null; }
+  if (!currentUser || !('IntersectionObserver' in window)) return;
+  const paras = [...document.querySelectorAll('.para[data-chapter][data-para]')];
+  if (!paras.length) return;
+  const acc = new Map(), seenAt = new Map();
+  const obs = new IntersectionObserver(es => {
+    const t = Date.now();
+    es.forEach(e => {
+      const k = `${e.target.dataset.chapter}|${e.target.dataset.para}`;
+      if (e.isIntersecting) seenAt.set(k, t);
+      else if (seenAt.has(k)) { acc.set(k, (acc.get(k) || 0) + (t - seenAt.get(k)) / 1000); seenAt.delete(k); }
+    });
+  }, { threshold: 0.6 });
+  paras.forEach(p => obs.observe(p));
+  const flush = async () => {
+    const t = Date.now();
+    seenAt.forEach((st, k) => { acc.set(k, (acc.get(k) || 0) + (t - st) / 1000); seenAt.set(k, t); });
+    if (!acc.size) return;
+    const rows = [...acc.entries()]
+      .map(([k, s]) => { const [ch, pi] = k.split('|'); return { post_id: postId, chapter_id: ch, paragraph_index: Number(pi), seconds: Math.round(s) }; })
+      .filter(r => r.seconds >= 1);
+    acc.clear();
+    if (rows.length) await sb.rpc('bump_dwells', { p_rows: rows });
+  };
+  const iv = setInterval(flush, 25000);
+  const onHide = () => { if (document.visibilityState === 'hidden') flush(); };
+  document.addEventListener('visibilitychange', onHide);
+  window.addEventListener('pagehide', flush);
+  dwellSession = { cleanup: () => { clearInterval(iv); document.removeEventListener('visibilitychange', onHide); window.removeEventListener('pagehide', flush); obs.disconnect(); } };
+}
+
+async function toggleHeatMap(postId) {
+  const btn = document.getElementById('heatBtn');
+  const turningOn = !document.body.classList.contains('heat-on');
+  document.body.classList.toggle('heat-on', turningOn);
+  if (!turningOn) {
+    document.querySelectorAll('.para[data-para]').forEach(p => p.style.removeProperty('background'));
+    return;
+  }
+  const { data } = await sb.from('paragraph_dwell').select('chapter_id,paragraph_index,seconds').eq('post_id', postId);
+  const byKey = {}; let max = 0;
+  (data || []).forEach(r => {
+    const k = `${r.chapter_id}|${r.paragraph_index}`;
+    byKey[k] = (byKey[k] || 0) + Number(r.seconds);
+    if (byKey[k] > max) max = byKey[k];
+  });
+  if (!max) {
+    document.body.classList.remove('heat-on');
+    btn.textContent = '🔥 Henüz veri yok';
+    setTimeout(() => { btn.textContent = '🔥 Okur ısısı'; }, 2200);
+    return;
+  }
+  document.querySelectorAll('.para[data-chapter][data-para]').forEach(p => {
+    const s = byKey[`${p.dataset.chapter}|${p.dataset.para}`] || 0;
+    const a = Math.min(0.45, s / max * 0.45);
+    p.style.background = s ? `linear-gradient(rgba(217,185,120,${a}),rgba(217,185,120,${a}))` : '';
+  });
+  btn.textContent = '🔥 Isıyı kapat';
+  setTimeout(() => { if (document.body.classList.contains('heat-on')) btn.textContent = '🔥 Okur ısısı'; }, 3000);
+}
+
+// Sesli yorum: MediaRecorder → post-media → form dataset, submit'te insert'e eklenir.
+let cVoiceRec = null;
+function wireVoiceButtons(scope) {
+  scope.querySelectorAll('.comment-voice-btn').forEach(b => {
+    if (b.dataset.wired) return;
+    b.dataset.wired = '1';
+    b.addEventListener('click', () => toggleVoiceRecord(b));
+  });
+}
+async function toggleVoiceRecord(btn) {
+  if (cVoiceRec) { cVoiceRec.stop(); return; }
+  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') return alert('Tarayıcın ses kaydını desteklemiyor.');
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const chunks = []; const started = Date.now();
+    cVoiceRec = new MediaRecorder(stream);
+    cVoiceRec.ondataavailable = ev => { if (ev.data.size) chunks.push(ev.data); };
+    const mime = cVoiceRec.mimeType || 'audio/webm';
+    cVoiceRec.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      cVoiceRec = null;
+      btn.textContent = '🎙️';
+      if (!chunks.length) return;
+      const blob = new Blob(chunks, { type: mime });
+      if (blob.size > 15 * 1024 * 1024) return alert('Ses kaydı çok uzun (15 MB sınırı).');
+      const ext = (blob.type.match(/\/(webm|ogg|mp4|mpeg|wav)/)?.[1]) || 'webm';
+      const path = `${currentUser.id}/comment-audio/${crypto.randomUUID()}.${ext}`;
+      const up = await sb.storage.from('post-media').upload(path, blob, { contentType: blob.type });
+      if (up.error) return alert('Ses yüklenemedi: ' + up.error.message);
+      const form = btn.closest('form');
+      if (form) {
+        form.dataset.audioPath = path;
+        form.dataset.audioSeconds = String(Math.round((Date.now() - started) / 1000));
+        form.querySelector('.voice-attached')?.remove();
+        btn.insertAdjacentHTML('afterend', '<span class="small voice-attached">🎙️ sesli yorum eklendi <a href="#" data-rmvoice>✕</a></span>');
+      }
+    };
+    cVoiceRec.start();
+    btn.textContent = '⏹️';
+  } catch { alert('Mikrofona erişilemedi.'); }
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-rmvoice]');
+  if (!a) return;
+  e.preventDefault();
+  const f = a.closest('form');
+  if (f) { delete f.dataset.audioPath; delete f.dataset.audioSeconds; }
+  a.closest('.voice-attached')?.remove();
+});
+
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+}
 
 init().catch(err => {
   app.innerHTML = `<div class="empty">Halka başlatılamadı.<br><span class="small">${esc(err.message)}</span></div>`;

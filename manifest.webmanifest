@@ -1,0 +1,15 @@
+{
+  "name": "HALKA — Yaratıcı Üretim Platformu",
+  "short_name": "HALKA",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#171512",
+  "theme_color": "#171512",
+  "description": "Yazı, çizim, fotoğraf, video ve müzik eserlerin için üretim platformu.",
+  "icons": [
+    { "src": "/assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/assets/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
