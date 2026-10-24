@@ -2466,8 +2466,6 @@ async function renderRead(id, query = '') {
       b.classList.toggle('on', !mine);
       b.innerHTML = `${em} <span>${commentRx[cid][em] || 0}</span>`;
     }));
-    wireVoiceButtons(scope);
-    wireGifButtons(scope);
     scope.querySelectorAll('.comment-like').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!currentUser) { location.hash = '#/auth'; return; }
@@ -3357,8 +3355,6 @@ async function renderRead(id, query = '') {
   }));
   document.getElementById('heatBtn')?.addEventListener('click', () => toggleHeatMap(id));
   initDwellTracking(id);
-  wireVoiceButtons(app);
-  wireGifButtons(app);
 
   // Manga okuma modu: dikey akış / tek sayfa / sağdan sola
   const modeBar = document.getElementById('mangaModeBar');
@@ -9239,6 +9235,20 @@ async function toggleVoiceRecord(btn) {
     btn.textContent = '⏹️';
   } catch { alert('Mikrofona erişilemedi.'); }
 }
+// Sesli yorum + GIF: document seviyesi delegasyon — render/zamanlama bağımsız.
+document.addEventListener('click', e => {
+  const vb = e.target.closest('.comment-voice-btn');
+  if (vb) {
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    toggleVoiceRecord(vb);
+    return;
+  }
+  const gb = e.target.closest('.comment-gif-btn');
+  if (gb) {
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    openGifPicker(url => { const f = gb.closest('form'); if (f) attachGifToForm(f, url); });
+  }
+});
 document.addEventListener('click', e => {
   const a = e.target.closest('[data-rmvoice]');
   if (!a) return;
@@ -9312,6 +9322,50 @@ document.addEventListener('click', e => {
   a.closest('.gif-attached')?.remove();
 });
 
+// Tema uyumlu video oynatıcı: video.media'ya özel kontrol çubuğu.
+function themeVideoPlayers(root) {
+  root.querySelectorAll('video.media:not([data-themed])').forEach(el => {
+    el.dataset.themed = '1';
+    el.controls = false;
+    const w = document.createElement('div');
+    w.className = 'h-vplayer';
+    el.parentNode.insertBefore(w, el);
+    w.appendChild(el);
+    w.insertAdjacentHTML('beforeend',
+      `<button class="h-bigplay" type="button" aria-label="Oynat">▶</button>
+       <div class="h-vbar">
+         <button class="h-play" type="button">▶</button>
+         <div class="h-track"><div class="h-progress"></div></div>
+         <span class="h-time">0:00</span>
+         <button class="h-fs" type="button" title="Tam ekran">⛶</button>
+       </div>`);
+    const btn = w.querySelector('.h-play'), big = w.querySelector('.h-bigplay'),
+      bar = w.querySelector('.h-progress'), track = w.querySelector('.h-track'),
+      time = w.querySelector('.h-time');
+    const fmt = s => isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
+    const toggle = () => el.paused ? el.play() : el.pause();
+    btn.addEventListener('click', toggle);
+    big.addEventListener('click', toggle);
+    el.addEventListener('click', toggle);
+    el.addEventListener('play', () => { btn.textContent = '⏸'; big.style.display = 'none'; });
+    el.addEventListener('pause', () => { btn.textContent = '▶'; big.style.display = ''; });
+    el.addEventListener('timeupdate', () => {
+      const d = el.duration || 0;
+      bar.style.width = d ? `${el.currentTime / d * 100}%` : '0%';
+      time.textContent = `${fmt(el.currentTime)} / ${fmt(d)}`;
+    });
+    el.addEventListener('loadedmetadata', () => { time.textContent = `0:00 / ${fmt(el.duration)}`; });
+    track.addEventListener('click', e => {
+      const r = track.getBoundingClientRect();
+      if (el.duration) el.currentTime = (e.clientX - r.left) / r.width * el.duration;
+    });
+    w.querySelector('.h-fs').addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else w.requestFullscreen?.();
+    });
+  });
+}
+
 // Tema uyumlu ses oynatıcı: audio.media'yi HALKA çubuğuna çevirir.
 function themeAudioPlayers(root) {
   root.querySelectorAll('audio.media:not([data-themed])').forEach(el => {
@@ -9341,7 +9395,7 @@ function themeAudioPlayers(root) {
   });
 }
 new MutationObserver(ms => {
-  if (ms.some(m => m.addedNodes.length)) themeAudioPlayers(app);
+  if (ms.some(m => m.addedNodes.length)) { themeAudioPlayers(app); themeVideoPlayers(app); }
 }).observe(app, { childList: true, subtree: true });
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {

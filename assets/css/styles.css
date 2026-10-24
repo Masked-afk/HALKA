@@ -671,3 +671,15 @@ audio{max-width:100%}
 .h-track{flex:1;height:8px;background:rgba(217,185,120,.15);border-radius:99px;cursor:pointer;overflow:hidden}
 .h-progress{height:100%;width:0;background:linear-gradient(90deg,#8a7440,var(--gold));border-radius:99px;transition:width .15s linear}
 .h-time{font-size:.78rem;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}
+
+/* HALKA temali video oynatici */
+.h-vplayer{position:relative;border-radius:12px;overflow:hidden;background:#000;margin:6px 0}
+.h-vplayer video{display:block;width:100%;max-height:70vh}
+.h-bigplay{position:absolute;inset:0;margin:auto;width:72px;height:72px;border-radius:50%;border:none;background:rgba(217,185,120,.9);color:#171512;font-size:26px;cursor:pointer;transition:transform .15s}
+.h-bigplay:hover{transform:scale(1.08)}
+.h-vbar{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:10px;padding:8px 12px;background:linear-gradient(transparent,rgba(10,9,6,.9));opacity:0;transition:opacity .2s}
+.h-vplayer:hover .h-vbar,.h-vplayer video.paused + * .h-vbar{opacity:1}
+.h-vbar .h-play{width:32px;height:32px;font-size:13px}
+.h-vbar .h-track{height:6px}
+.h-fs{width:32px;height:32px;border-radius:8px;border:none;background:rgba(255,255,255,.12);color:#f5efe2;font-size:15px;cursor:pointer}
+.h-fs:hover{background:rgba(255,255,255,.22)}
