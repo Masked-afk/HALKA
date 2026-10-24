@@ -706,3 +706,4 @@ audio{max-width:100%}
 .cember-msg.thinking{opacity:.6;font-style:italic}
 .cember-msg.thinking::after{content:'…';display:inline-block;animation:cemberDots 1.2s steps(3) infinite}
 @keyframes cemberDots{0%{opacity:.2}50%{opacity:1}100%{opacity:.2}}
+.cember-disclaimer{font-size:.72rem;color:var(--muted,#8f8a80);margin:6px 2px 0;text-align:center;opacity:.8}
