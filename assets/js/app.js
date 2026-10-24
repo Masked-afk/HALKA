@@ -8952,7 +8952,7 @@ async function cemberAskAI(text) {
   try {
     const hist = cemberHistory.slice(-3).map(h => `Kullanıcı: ${h.q} | Çember: ${h.a}`).join(' ;; ');
     const prompt = CEMBER_PERSONA + (hist ? `Önceki konuşma: ${hist} ` : '') + text;
-    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai', { signal: AbortSignal.timeout(16000) });
+    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=mistral', { signal: AbortSignal.timeout(25000) });
     if (!r.ok) throw new Error(String(r.status));
     const reply = (await r.text()).trim().slice(0, 600);
     return reply || null;
@@ -9118,7 +9118,7 @@ document.getElementById('halkaHelperForm').addEventListener('submit', async even
   const ai = await cemberAskAI(rawQ);
   think.remove();
   if (ai) { cemberHistory.push({ q: rawQ, a: ai }); cemberHistory = cemberHistory.slice(-6); cemberBubble(esc(ai), 'bot'); }
-  else keywordReply();
+  else { cemberBubble('Bağlantı kuramadım — birazdan tekrar dener misin? 🌱', 'bot'); keywordReply(); }
 });
 
 // ── Etkileşim paketi yardımcıları ──
