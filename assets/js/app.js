@@ -8952,10 +8952,14 @@ async function cemberAskAI(text) {
   try {
     const hist = cemberHistory.slice(-3).map(h => `Kullanıcı: ${h.q} | Çember: ${h.a}`).join(' ;; ');
     const prompt = CEMBER_PERSONA + (hist ? `Önceki konuşma: ${hist} ` : '') + text;
-    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai', { signal: AbortSignal.timeout(25000) });
-    if (!r.ok) throw new Error(String(r.status));
-    const reply = (await r.text()).trim().slice(0, 600);
-    return reply || null;
+    for (let tryN = 0; tryN < 2; tryN++) {
+      const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai', { signal: AbortSignal.timeout(25000) });
+      if (r.ok) {
+        const reply = (await r.text()).trim().slice(0, 600);
+        if (reply) return reply;
+      }
+    }
+    return null;
   } catch { return null; }
 }
 function cemberBubble(html, cls) {
