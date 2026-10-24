@@ -2366,7 +2366,7 @@ async function renderRead(id, query = '') {
           <span class="comment-author">${esc(displayName(cp, 'Anonim'))}</span>
           <span class="comment-date">${esc(formatDate(c.created_at))}</span>
         </div>
-        <div class="comment-body">${c.media_second !== null && c.media_second !== undefined ? `<button class="comment-ts" type="button" data-sec="${c.media_second}" title="Medyada bu ana git">⏱️ ${Math.floor(c.media_second / 60)}:${String(c.media_second % 60).padStart(2, '0')}</button> ` : ''}${esc(c.body)}${c.audio_path && audioUrlMap[c.audio_path] ? `<audio class="comment-voice" src="${esc(audioUrlMap[c.audio_path])}" controls preload="metadata"></audio>` : ''}</div>
+        <div class="comment-body">${c.media_second !== null && c.media_second !== undefined ? `<button class="comment-ts" type="button" data-sec="${c.media_second}" title="Medyada bu ana git">⏱️ ${Math.floor(c.media_second / 60)}:${String(c.media_second % 60).padStart(2, '0')}</button> ` : ''}${esc(c.body)}${c.gif_url ? `<img class="comment-gif" src="${esc(c.gif_url)}" alt="gif" loading="lazy">` : ''}${c.audio_path && audioUrlMap[c.audio_path] ? `<audio class="comment-voice" src="${esc(audioUrlMap[c.audio_path])}" controls preload="metadata"></audio>` : ''}</div>
         <div class="comment-rx">${REACTIONS.slice(0, 3).map(e => `<button class="react-chip${commentRxMine[c.id]?.has(e) ? ' on' : ''}" data-cid="${esc(String(c.id))}" data-emoji="${e}" type="button">${e} <span>${(commentRx[c.id] || {})[e] || 0}</span></button>`).join('')}</div>
         <div class="comment-tools">
           <button class="comment-like ${commentLiked ? 'liked' : ''}" data-comment-id="${esc(c.id)}" type="button" aria-pressed="${commentLiked}" aria-label="Yorumu beğen">
@@ -2467,6 +2467,7 @@ async function renderRead(id, query = '') {
       b.innerHTML = `${em} <span>${commentRx[cid][em] || 0}</span>`;
     }));
     wireVoiceButtons(scope);
+    wireGifButtons(scope);
     scope.querySelectorAll('.comment-like').forEach(btn => {
       btn.addEventListener('click', async () => {
         if (!currentUser) { location.hash = '#/auth'; return; }
@@ -2654,7 +2655,7 @@ async function renderRead(id, query = '') {
           <button class="chapter-comments-toggle" data-chapter="${esc(ch.id)}" type="button">💬 Bölüm yorumları (<span>${chComments.length}</span>)</button>
           <div class="chapter-comments-panel" hidden>
             <div class="chapter-comments-list">${chComments.length ? chComments.map(c => renderComment(c)).join('') : '<div class="empty small">Bu bölüme henüz yorum yok.</div>'}</div>
-            ${currentUser ? `<form class="chapter-comment-form" data-chapter="${esc(ch.id)}"><textarea maxlength="1000" placeholder="Bu bölüme yorum yaz…" required></textarea><button class="btn ghost small comment-voice-btn" type="button" title="Sesli yorum kaydet">🎙️</button><button class="btn small" type="submit">Gönder</button></form>` : ''}
+            ${currentUser ? `<form class="chapter-comment-form" data-chapter="${esc(ch.id)}"><textarea maxlength="1000" placeholder="Bu bölüme yorum yaz…" required></textarea><button class="btn ghost small comment-voice-btn" type="button" title="Sesli yorum kaydet">🎙️</button><button class="btn ghost small comment-gif-btn" type="button" title="GIF ekle">GIF</button><button class="btn small" type="submit">Gönder</button></form>` : ''}
           </div>
         </div>
       </section>`;
@@ -2719,6 +2720,7 @@ async function renderRead(id, query = '') {
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
             <button class="btn primary" type="submit">Yorumu gönder</button>
             <button class="btn ghost small comment-voice-btn" type="button" title="Sesli yorum kaydet">🎙️</button>
+            <button class="btn ghost small comment-gif-btn" type="button" title="GIF ekle">GIF</button>
             ${['music','video'].includes(post.type) && post.media_url ? `<button class="btn ghost small" id="timestampBtn" type="button">⏱️ Bu anı işaretle</button><span class="small" id="timestampHint"></span>` : ''}
           </div>
         </form>
@@ -2828,19 +2830,20 @@ async function renderRead(id, query = '') {
     e.preventDefault();
     const form = e.currentTarget;
     const body = document.getElementById('commentBody').value.trim();
-    if (!body) return;
+    if (!body && !form.dataset.gifUrl && !form.dataset.audioPath) return;
     const button = form.querySelector('button[type="submit"]');
     button.disabled = true;
     const { data, error: cErr } = await sb.from('comments').insert({
-      post_id: id, author_id: currentUser.id, body,
+      post_id: id, author_id: currentUser.id, body: body || '🎞️',
       media_second: pendingTimestamp,
       audio_path: form.dataset.audioPath || null,
-      audio_seconds: Number(form.dataset.audioSeconds) || null
+      audio_seconds: Number(form.dataset.audioSeconds) || null,
+      gif_url: form.dataset.gifUrl || null
     }).select('*').single();
     button.disabled = false;
     if (cErr) { alert('Yorum eklenemedi: ' + friendlyWriteError(cErr.message)); return; }
-    delete form.dataset.audioPath; delete form.dataset.audioSeconds;
-    form.querySelector('.voice-attached')?.remove();
+    delete form.dataset.audioPath; delete form.dataset.audioSeconds; delete form.dataset.gifUrl;
+    form.querySelector('.voice-attached')?.remove(); form.querySelector('.gif-attached')?.remove();
     form.reset();
     pendingTimestamp = null;
     const hint = document.getElementById('timestampHint');
@@ -2872,19 +2875,21 @@ async function renderRead(id, query = '') {
       e.preventDefault();
       const textarea = form.querySelector('textarea');
       const body = textarea.value.trim();
-      if (!body) return;
+      if (!body && !form.dataset.gifUrl && !form.dataset.audioPath) return;
       const submitBtn = form.querySelector('button[type="submit"]');
       submitBtn.disabled = true;
       const { data, error: cErr } = await sb.from('comments').insert({
-        post_id: id, author_id: currentUser.id, chapter_id: form.dataset.chapter, body,
+        post_id: id, author_id: currentUser.id, chapter_id: form.dataset.chapter, body: body || '🎞️',
         audio_path: form.dataset.audioPath || null,
-        audio_seconds: Number(form.dataset.audioSeconds) || null
+        audio_seconds: Number(form.dataset.audioSeconds) || null,
+        gif_url: form.dataset.gifUrl || null
       }).select('*').single();
       submitBtn.disabled = false;
       if (cErr) { alert('Yorum eklenemedi: ' + friendlyWriteError(cErr.message)); return; }
-      delete form.dataset.audioPath; delete form.dataset.audioSeconds;
-      form.querySelector('.voice-attached')?.remove();
+      delete form.dataset.audioPath; delete form.dataset.audioSeconds; delete form.dataset.gifUrl;
+      form.querySelector('.voice-attached')?.remove(); form.querySelector('.gif-attached')?.remove();
       textarea.value = '';
+      textarea.required = true;
       comments.push(data);
       const chapterKey = form.dataset.chapter;
       if (!commentsByChapter.has(chapterKey)) commentsByChapter.set(chapterKey, []);
@@ -3353,6 +3358,7 @@ async function renderRead(id, query = '') {
   document.getElementById('heatBtn')?.addEventListener('click', () => toggleHeatMap(id));
   initDwellTracking(id);
   wireVoiceButtons(app);
+  wireGifButtons(app);
 
   // Manga okuma modu: dikey akış / tek sayfa / sağdan sola
   const modeBar = document.getElementById('mangaModeBar');
@@ -4947,7 +4953,7 @@ async function renderChat(conversationId, query = '') {
           ${sharedPost ? `<div id="chatSharePreview" class="chat-share-preview"><div class="small">Bu eser mesajına eklenecek:</div>${chatPostPreview(sharedPost)}</div>` : '<div id="chatSharePreview" class="chat-share-preview"></div>'}
           <form id="chatComposeForm" class="chat-compose">
             <textarea id="chatMessageBody" maxlength="4000" aria-label="Mesajın" placeholder="Mesajını yaz…"></textarea>
-            <div class="chat-attachment-picker"><label class="btn ghost small" for="chatAttachment">Fotoğraf, video veya PDF ekle</label><input id="chatAttachment" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,application/pdf" hidden><button class="btn ghost small" id="chatVoiceBtn" type="button" title="Sesli mesaj kaydet">🎙️</button><span id="chatAttachmentName" class="small">En fazla 25 MB</span></div>
+            <div class="chat-attachment-picker"><label class="btn ghost small" for="chatAttachment">Fotoğraf, video veya PDF ekle</label><input id="chatAttachment" type="file" accept="image/jpeg,image/png,image/webp,image/gif,video/mp4,video/webm,application/pdf" hidden><button class="btn ghost small" id="chatVoiceBtn" type="button" title="Sesli mesaj kaydet">🎙️</button><button class="btn ghost small" id="chatGifBtn" type="button" title="GIF gönder">GIF</button><span id="chatAttachmentName" class="small">En fazla 25 MB</span></div>
             <button class="btn primary" type="submit">${sharedPost ? 'Eseri gönder' : 'Gönder'}</button>
           </form>
           <div id="chatSendMessage" class="message" style="padding:0 14px 8px" aria-live="polite"></div>
@@ -5057,6 +5063,7 @@ async function renderChat(conversationId, query = '') {
     const attachmentPaths = rows.filter(row => row.attachment_path).map(row => row.attachment_path);
     const signedAttachments = attachmentPaths.length ? await sb.storage.from('chat-media').createSignedUrls(attachmentPaths, 3600) : { data: [] };
     const attachmentUrls = Object.fromEntries((signedAttachments.data || []).map(item => [item.path, item.signedUrl]));
+    attachmentPaths.filter(p => /^https?:\/\//.test(p)).forEach(p => { attachmentUrls[p] = p; });
     const msgIds = rows.map(r => r.id);
     const { data: reactionRows } = msgIds.length
       ? await sb.from('message_reactions').select('message_id,user_id,emoji').in('message_id', msgIds)
@@ -5214,6 +5221,18 @@ async function renderChat(conversationId, query = '') {
     document.querySelector(`#chatMessages [data-msg-id="${CSS.escape(btn.dataset.jump)}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   });
   let voiceRecorder = null;
+  document.getElementById('chatGifBtn')?.addEventListener('click', () => {
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    openGifPicker(async url => {
+      const { error } = await sb.from('messages').insert({
+        conversation_id: activeId, sender_id: currentUser.id, body: '🎞️ GIF',
+        attachment_path: url, attachment_mime: 'image/gif', attachment_name: 'GIF',
+        delivered_at: new Date().toISOString()
+      });
+      if (error) alert('GIF gönderilemedi: ' + error.message);
+      else await loadMessages(true);
+    });
+  });
   document.getElementById('chatVoiceBtn')?.addEventListener('click', async () => {
     const btn = document.getElementById('chatVoiceBtn');
     const status = document.getElementById('chatSendMessage');
@@ -9227,6 +9246,70 @@ document.addEventListener('click', e => {
   const f = a.closest('form');
   if (f) { delete f.dataset.audioPath; delete f.dataset.audioSeconds; }
   a.closest('.voice-attached')?.remove();
+});
+
+// GIF seçici (GIPHY): arama + ızgara, seçince onPick(url) çağırır.
+const GIPHY_KEY = 'tCTMtyKwb3fFwQFMwAPPUv0wF4ZtCGxN';
+function openGifPicker(onPick) {
+  document.querySelector('.gif-picker')?.remove();
+  const ov = document.createElement('div');
+  ov.className = 'gif-picker';
+  ov.innerHTML = `<div class="gif-card">
+    <input class="gif-search" type="search" placeholder="GIF ara… (örn. alkış, ağla, dans)" maxlength="60">
+    <div class="gif-grid"><div class="small">Yükleniyor…</div></div>
+    <button class="btn ghost small gif-close" type="button">Kapat</button>
+  </div>`;
+  document.body.appendChild(ov);
+  const grid = ov.querySelector('.gif-grid'), inp = ov.querySelector('.gif-search');
+  const load = async q => {
+    grid.innerHTML = '<div class="small">Yükleniyor…</div>';
+    const ep = q ? 'search' : 'trending';
+    try {
+      const res = await fetch(`https://api.giphy.com/v1/gifs/${ep}?api_key=${GIPHY_KEY}&limit=24&rating=pg-13&lang=tr${q ? '&q=' + encodeURIComponent(q) : ''}`);
+      const { data } = await res.json();
+      grid.innerHTML = (data || []).map(g =>
+        `<img class="gif-item" src="${g.images.fixed_height_small.url}" data-url="${g.images.fixed_height.url}" loading="lazy" alt="gif">`
+      ).join('') || '<div class="empty small">Sonuç yok.</div>';
+    } catch { grid.innerHTML = '<div class="empty small">GIF\'ler yüklenemedi.</div>'; }
+  };
+  let t;
+  inp.addEventListener('input', () => { clearTimeout(t); t = setTimeout(() => load(inp.value.trim()), 400); });
+  grid.addEventListener('click', e => {
+    const img = e.target.closest('.gif-item');
+    if (!img) return;
+    ov.remove();
+    onPick(img.dataset.url);
+  });
+  ov.querySelector('.gif-close').addEventListener('click', () => ov.remove());
+  ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+  load('');
+  inp.focus();
+}
+function attachGifToForm(form, url) {
+  form.dataset.gifUrl = url;
+  const ta = form.querySelector('textarea');
+  if (ta) ta.required = false;
+  form.querySelector('.gif-attached')?.remove();
+  const btn = form.querySelector('.comment-gif-btn') || form.querySelector('button[type="submit"]');
+  btn?.insertAdjacentHTML('afterend', `<span class="small gif-attached">🎞️ GIF eklendi <a href="#" data-rmgif>✕</a></span>`);
+}
+function wireGifButtons(scope) {
+  scope.querySelectorAll('.comment-gif-btn').forEach(b => {
+    if (b.dataset.wired) return;
+    b.dataset.wired = '1';
+    b.addEventListener('click', () => {
+      if (!currentUser) { location.hash = '#/auth?signup'; return; }
+      openGifPicker(url => { const f = b.closest('form'); if (f) attachGifToForm(f, url); });
+    });
+  });
+}
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-rmgif]');
+  if (!a) return;
+  e.preventDefault();
+  const f = a.closest('form');
+  if (f) { delete f.dataset.gifUrl; const ta = f.querySelector('textarea'); if (ta) ta.required = true; }
+  a.closest('.gif-attached')?.remove();
 });
 
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
