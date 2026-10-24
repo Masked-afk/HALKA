@@ -662,3 +662,12 @@ video.media,audio.media{display:block;width:100%;background:#0a0906;border-radiu
 audio.media{height:44px}
 video{max-width:100%}
 audio{max-width:100%}
+
+/* HALKA temali ses oynatici */
+.h-player{display:flex;align-items:center;gap:12px;background:linear-gradient(135deg,var(--panel),var(--card));border:1px solid var(--line);border-radius:14px;padding:10px 14px;margin:6px 0}
+.h-player audio{display:none}
+.h-play{width:40px;height:40px;border-radius:50%;border:none;background:var(--gold);color:#171512;font-size:15px;cursor:pointer;flex-shrink:0;line-height:1}
+.h-play:hover{transform:scale(1.06)}
+.h-track{flex:1;height:8px;background:rgba(217,185,120,.15);border-radius:99px;cursor:pointer;overflow:hidden}
+.h-progress{height:100%;width:0;background:linear-gradient(90deg,#8a7440,var(--gold));border-radius:99px;transition:width .15s linear}
+.h-time{font-size:.78rem;color:var(--muted);white-space:nowrap;font-variant-numeric:tabular-nums}

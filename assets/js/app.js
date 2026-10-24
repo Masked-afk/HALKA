@@ -9312,6 +9312,38 @@ document.addEventListener('click', e => {
   a.closest('.gif-attached')?.remove();
 });
 
+// Tema uyumlu ses oynatıcı: audio.media'yi HALKA çubuğuna çevirir.
+function themeAudioPlayers(root) {
+  root.querySelectorAll('audio.media:not([data-themed])').forEach(el => {
+    el.dataset.themed = '1';
+    const w = document.createElement('div');
+    w.className = 'h-player';
+    w.innerHTML = '<button class="h-play" type="button" aria-label="Oynat">▶</button><div class="h-track"><div class="h-progress"></div></div><span class="h-time">0:00</span>';
+    el.parentNode.insertBefore(w, el);
+    el.controls = false;
+    w.appendChild(el);
+    const btn = w.querySelector('.h-play'), bar = w.querySelector('.h-progress'),
+      track = w.querySelector('.h-track'), time = w.querySelector('.h-time');
+    const fmt = s => isFinite(s) ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}` : '0:00';
+    btn.addEventListener('click', () => el.paused ? el.play() : el.pause());
+    el.addEventListener('play', () => { btn.textContent = '⏸'; });
+    el.addEventListener('pause', () => { btn.textContent = '▶'; });
+    el.addEventListener('timeupdate', () => {
+      const d = el.duration || 0;
+      bar.style.width = d ? `${el.currentTime / d * 100}%` : '0%';
+      time.textContent = `${fmt(el.currentTime)} / ${fmt(d)}`;
+    });
+    el.addEventListener('loadedmetadata', () => { time.textContent = `0:00 / ${fmt(el.duration)}`; });
+    track.addEventListener('click', e => {
+      const r = track.getBoundingClientRect();
+      if (el.duration) el.currentTime = (e.clientX - r.left) / r.width * el.duration;
+    });
+  });
+}
+new MutationObserver(ms => {
+  if (ms.some(m => m.addedNodes.length)) themeAudioPlayers(app);
+}).observe(app, { childList: true, subtree: true });
+
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
 }

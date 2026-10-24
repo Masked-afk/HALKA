@@ -1,5 +1,5 @@
-const SHELL = 'halka-shell-v1';
-const RUNTIME = 'halka-rt-v1';
+const SHELL = 'halka-shell-v2';
+const RUNTIME = 'halka-rt-v2';
 const SHELL_FILES = ['/', '/index.html', '/assets/js/app.js', '/assets/css/styles.css', '/manifest.webmanifest'];
 
 self.addEventListener('install', e => {
@@ -15,14 +15,22 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET') return;
   const u = new URL(e.request.url);
-  if (u.origin === location.origin && SHELL_FILES.includes(u.pathname)) {
-    e.respondWith(caches.match(e.request).then(r => r || fetch(e.request)));
+  // Uygulama kabuğu: önce ağ, düşerse cache — güncellemeler anında gelsin.
+  if (u.origin === location.origin && (SHELL_FILES.includes(u.pathname) || u.pathname === '/')) {
+    e.respondWith(
+      fetch(e.request).then(r => {
+        if (r.ok) { const cl = r.clone(); caches.open(SHELL).then(c => c.put(e.request, cl)); }
+        return r;
+      }).catch(() => caches.match(e.request))
+    );
     return;
   }
+  // Statik/medyalar: stale-while-revalidate.
   const cacheable =
-    (u.origin === location.origin && /\.(png|jpg|webp|svg|css|js|woff2?)$/.test(u.pathname)) ||
+    (u.origin === location.origin && /\.(png|jpg|webp|svg|woff2?)$/.test(u.pathname)) ||
     (u.hostname.endsWith('.supabase.co') && u.pathname.startsWith('/storage/')) ||
-    u.hostname === 'fonts.googleapis.com' || u.hostname === 'fonts.gstatic.com';
+    u.hostname === 'fonts.googleapis.com' || u.hostname === 'fonts.gstatic.com' ||
+    u.hostname.endsWith('.giphy.com');
   if (!cacheable) return;
   e.respondWith(caches.open(RUNTIME).then(async c => {
     const cached = await c.match(e.request);
