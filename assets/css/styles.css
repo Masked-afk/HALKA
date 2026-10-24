@@ -688,3 +688,5 @@ audio{max-width:100%}
 .h-speed:hover,.h-pip:hover{background:rgba(255,255,255,.22)}
 
 .voice-preview{max-width:220px;height:34px;vertical-align:middle}
+
+.gif-preview{display:inline-block;max-width:180px;max-height:110px;border-radius:8px;vertical-align:middle}

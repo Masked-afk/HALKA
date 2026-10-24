@@ -2889,6 +2889,7 @@ async function renderRead(id, query = '') {
       textarea.value = '';
       textarea.required = true;
       comments.push(data);
+      if (currentUser && !commentProfileMap[currentUser.id]) commentProfileMap[currentUser.id] = currentProfile || { id: currentUser.id, username: currentUser.email };
       const chapterKey = form.dataset.chapter;
       if (!commentsByChapter.has(chapterKey)) commentsByChapter.set(chapterKey, []);
       commentsByChapter.get(chapterKey).push(data);
@@ -2936,6 +2937,7 @@ async function renderRead(id, query = '') {
         submitBtn.disabled = false;
         if (cErr) { alert('Yorum eklenemedi: ' + friendlyWriteError(cErr.message)); return; }
         comments.push(data);
+      if (currentUser && !commentProfileMap[currentUser.id]) commentProfileMap[currentUser.id] = currentProfile || { id: currentUser.id, username: currentUser.email };
         if (!commentsByParagraph.has(pKey)) commentsByParagraph.set(pKey, []);
         commentsByParagraph.get(pKey).push(data);
         const list = panel.querySelector('.para-comments-list');
@@ -9302,7 +9304,7 @@ function attachGifToForm(form, url) {
   if (ta) ta.required = false;
   form.querySelector('.gif-attached')?.remove();
   const btn = form.querySelector('.comment-gif-btn') || form.querySelector('button[type="submit"]');
-  btn?.insertAdjacentHTML('afterend', `<span class="small gif-attached">🎞️ GIF eklendi <a href="#" data-rmgif>✕</a></span>`);
+  btn?.insertAdjacentHTML('afterend', `<span class="gif-attached"><img class="gif-preview" src="${url}" alt="gif"> <a href="#" data-rmgif>✕</a></span>`);
 }
 function wireGifButtons(scope) {
   scope.querySelectorAll('.comment-gif-btn').forEach(b => {
@@ -9385,7 +9387,7 @@ function themeVideoPlayers(root) {
 
 // Tema uyumlu ses oynatıcı: audio.media'yi HALKA çubuğuna çevirir.
 function themeAudioPlayers(root) {
-  root.querySelectorAll('audio.media:not([data-themed])').forEach(el => {
+  root.querySelectorAll('audio:is(.media,.voice-preview,.comment-voice,.chat-voice):not([data-themed])').forEach(el => {
     el.dataset.themed = '1';
     const w = document.createElement('div');
     w.className = 'h-player';
