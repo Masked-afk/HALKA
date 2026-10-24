@@ -8944,7 +8944,7 @@ const helperPanel = document.getElementById('halkaHelperPanel');
 const helperToggle = document.getElementById('halkaHelperToggle');
 const helperAnswer = document.getElementById('halkaHelperAnswer');
 // ── Çember AI: Pollinations üzerinden gerçek cevap ──
-const CEMBER_PERSONA = `Sen Çember'sin, HALKA adlı Türkçe üretim topluluğunun maskot yapay zekasısın. Her konuda samimi sohbet edersin; selamlaşma ve gündelik konuşmalara doğal, kısa karşılıklar ver. HALKA özellikleri sorulursa şunları bilirsin: yazı/kitap/manga/light novel/çizim/fotoğraf/video/müzik paylaşımı, topluluklar, grup sohbetleri, okuma kulüpleri, kolektif dergi, yazma sprinti, bölüm anketleri, rozetler, Ayın Halka'sı. Cevapların Türkçe, sıcak, 1-3 cümle olsun, arada emoji kullan. Kullanıcının mesajı: `;
+const CEMBER_PERSONA = `Sen Çember adında arkadaş canlısı bir yapay zekasın. Türkçe, kısa (1-2 cümle), doğal ve samimi cevaplar ver. HALKA platformuna dair sorular olursa bil: yazı/kitap/manga/çizim/fotoğraf/video/müzik paylaşımı, topluluklar, sohbet, dergi, sprint, rozetler. Uydurma bilgi verme; bilmiyorsan dürüstçe söyle. Mesaj: `;
 const CEMBER_MENTION = /@(çember|cember)/i;
 
 let cemberHistory = [];
@@ -9115,7 +9115,7 @@ document.getElementById('halkaHelperForm').addEventListener('submit', async even
   cemberBubble(esc(rawQ), 'user');
   const think = document.createElement('div');
   think.className = 'cember-msg bot thinking';
-  think.textContent = '🤖 yazıyor…';
+  think.textContent = '🤖 yazıyor';
   helperAnswer.appendChild(think);
   helperAnswer.scrollTop = helperAnswer.scrollHeight;
   const ai = await cemberAskAI(rawQ);
