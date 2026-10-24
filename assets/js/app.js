@@ -1373,7 +1373,7 @@ async function renderOzet() {
       }
       ctx.strokeStyle = '#E8923C'; ctx.beginPath(); ctx.arc(400, 890, 26, 0, Math.PI * 2); ctx.stroke();
       ctx.fillStyle = '#9a9484'; ctx.font = '18px Inter, sans-serif';
-      ctx.fillText('halka-sosyal.web.app', 400, 960);
+      ctx.fillText('halka-sosyal.com', 400, 960);
       canvas.toBlob(blob => {
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -9107,7 +9107,7 @@ async function makeShareCard(post, author) {
   x.fillStyle = '#b8ad97'; x.font = '400 40px Fredoka, sans-serif';
   x.fillText(author || 'Halka yazarı', 540, 1100);
   x.fillStyle = '#d9b978'; x.font = '700 38px Fredoka, sans-serif';
-  x.fillText('halka-sosyal.web.app', 540, 1240);
+  x.fillText('halka-sosyal.com', 540, 1240);
   cv.toBlob(b => {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(b); a.download = `halka-${post.id}.png`; a.click();
