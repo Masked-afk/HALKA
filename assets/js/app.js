@@ -124,6 +124,7 @@ function renderConsentGate() {
     const btn = e.currentTarget.querySelector('button[type="submit"]');
     btn.disabled = true;
     const meta = currentLegalMetadata();
+    if (currentUser) sb.from('profiles').update({ consent_v: 1 }).eq('id', currentUser.id).then(() => {});
     const { error } = await sb.auth.updateUser({ data: meta });
     try {
       await sb.rpc('record_legal_acceptance', {
@@ -1556,10 +1557,10 @@ function renderAuth(mode = 'signup') {  currentAuthMode = mode;
         </div>
         <div class="field">
           <label for="password">Şifre</label>
-          <input id="password" name="password" type="password" required maxlength="${signup ? '20' : '72'}" ${signup ? 'minlength="8"' : ''} autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? '8–20 karakter' : 'Şifren'}">
-          ${signup ? '<div class="small">8–20 karakter; harf, rakam ve sembol içermeli.</div>' : ''}
+          <input id="password" name="password" type="password" required maxlength="${signup ? '64' : '72'}" ${signup ? 'minlength="8"' : ''} autocomplete="${signup ? 'new-password' : 'current-password'}" placeholder="${signup ? '8–64 karakter' : 'Şifren'}">
+          ${signup ? '<div class="small">8–64 karakter; harf, rakam ve sembol içermeli.</div>' : ''}
         </div>
-        ${signup ? `<div class="field"><label for="passwordConfirm">Şifreyi tekrar yaz</label><input id="passwordConfirm" name="password_confirm" type="password" required minlength="8" maxlength="20" autocomplete="new-password"></div>` : ''}
+        ${signup ? `<div class="field"><label for="passwordConfirm">Şifreyi tekrar yaz</label><input id="passwordConfirm" name="password_confirm" type="password" required minlength="8" maxlength="64" autocomplete="new-password"></div>` : ''}
         ${signup ? `<div class="field" aria-label="Yasal belgeler">${legalCheckboxes()}</div>` : ''}
         <button class="btn primary" style="width:100%" type="submit">${signup ? 'Hesap oluştur' : 'Giriş yap'}</button>
       </form>
@@ -1609,7 +1610,7 @@ function renderAuth(mode = 'signup') {  currentAuthMode = mode;
         }
         const username = String(form.get('username') || '').trim().toLowerCase();
         const name = String(form.get('display_name') || '').trim();
-        if (password.length < 8 || password.length > 20) { showMessage('Şifre 8–20 karakter arasında olmalı.', true); return; }
+        if (password.length < 8 || password.length > 64) { showMessage('Şifre 8–64 karakter arasında olmalı.', true); return; }
         if (new TextEncoder().encode(password).length > 72) { showMessage('Bu şifre Supabase sınırını aşıyor. Daha kısa bir şifre seç.', true); return; }
         if (!/[a-z]/i.test(password) || !/\d/.test(password) || !/[^a-z0-9]/i.test(password)) { showMessage('Şifrede en az bir harf, bir rakam ve bir sembol kullan.', true); return; }
         if (password !== String(form.get('password_confirm') || '')) { showMessage('Şifreler eşleşmiyor.', true); return; }
@@ -9455,6 +9456,31 @@ function promptModal({ title, fields }) {
   });
 }
 
+// Temalı onay/bilgi pencereleri: confirm() ve alert() yerine.
+function confirmModal(title, text) {
+  return new Promise(res => {
+    const ov = document.createElement('div');
+    ov.className = 'badge-modal-backdrop';
+    ov.innerHTML = `<div class="card badge-modal" style="max-width:380px"><h3 style="margin:0 0 8px">${esc(title)}</h3>${text ? `<p class="small">${esc(text)}</p>` : ''}<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px"><button class="btn ghost small cm-no">Vazgeç</button><button class="btn danger small cm-yes">Onayla</button></div></div>`;
+    document.body.appendChild(ov);
+    const done = v => { ov.remove(); res(v); };
+    ov.querySelector('.cm-no').addEventListener('click', () => done(false));
+    ov.querySelector('.cm-yes').addEventListener('click', () => done(true));
+    ov.addEventListener('click', e => { if (e.target === ov) done(false); });
+  });
+}
+function alertModal(text, isErr) {
+  return new Promise(res => {
+    const ov = document.createElement('div');
+    ov.className = 'badge-modal-backdrop';
+    ov.innerHTML = `<div class="card badge-modal" style="max-width:380px"><p style="margin:0 0 12px;${isErr ? 'color:var(--red)' : ''}">${esc(String(text))}</p><div style="display:flex;justify-content:flex-end"><button class="btn primary small am-ok">Tamam</button></div></div>`;
+    document.body.appendChild(ov);
+    const done = () => { ov.remove(); res(); };
+    ov.querySelector('.am-ok').addEventListener('click', done);
+    ov.addEventListener('click', e => { if (e.target === ov) done(); });
+  });
+}
+
 // ── Kolektif dergi/sayı ──
 async function renderIssues() {
   app.innerHTML = loadingBlock('Dergiler yükleniyor…');
@@ -9533,7 +9559,7 @@ async function renderIssue(id) {
     renderIssue(id);
   });
   document.getElementById('issueDelBtn')?.addEventListener('click', async () => {
-    if (!confirm('Bu sayıyı silmek istediğinden emin misin?')) return;
+    if (!await confirmModal('Bu sayıyı sil', 'Sayı ve içindeki bağlantılar kaldırılır; eserler silinmez.')) return;
     await sb.from('joint_issues').delete().eq('id', id);
     location.hash = '#/dergi';
   });
