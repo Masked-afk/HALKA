@@ -9337,6 +9337,8 @@ function themeVideoPlayers(root) {
          <button class="h-play" type="button">▶</button>
          <div class="h-track"><div class="h-progress"></div></div>
          <span class="h-time">0:00</span>
+         <button class="h-speed" type="button" title="Oynatma hızı">1x</button>
+         <button class="h-pip" type="button" title="Kayan pencere">▣</button>
          <button class="h-fs" type="button" title="Tam ekran">⛶</button>
        </div>`);
     const btn = w.querySelector('.h-play'), big = w.querySelector('.h-bigplay'),
@@ -9358,6 +9360,20 @@ function themeVideoPlayers(root) {
     track.addEventListener('click', e => {
       const r = track.getBoundingClientRect();
       if (el.duration) el.currentTime = (e.clientX - r.left) / r.width * el.duration;
+    });
+    const speeds = [1, 1.25, 1.5, 2, 0.5], spBtn = w.querySelector('.h-speed');
+    spBtn.addEventListener('click', () => {
+      const next = speeds[(speeds.indexOf(el.playbackRate) + 1) % speeds.length];
+      el.playbackRate = next;
+      spBtn.textContent = next + 'x';
+    });
+    const pipBtn = w.querySelector('.h-pip');
+    if (!document.pictureInPictureEnabled) pipBtn.hidden = true;
+    pipBtn.addEventListener('click', async () => {
+      try {
+        if (document.pictureInPictureElement) await document.exitPictureInPicture();
+        else await el.requestPictureInPicture();
+      } catch {}
     });
     w.querySelector('.h-fs').addEventListener('click', () => {
       if (document.fullscreenElement) document.exitFullscreen();

@@ -683,3 +683,6 @@ audio{max-width:100%}
 .h-vbar .h-track{height:6px}
 .h-fs{width:32px;height:32px;border-radius:8px;border:none;background:rgba(255,255,255,.12);color:#f5efe2;font-size:15px;cursor:pointer}
 .h-fs:hover{background:rgba(255,255,255,.22)}
+
+.h-speed,.h-pip{width:34px;height:32px;border-radius:8px;border:none;background:rgba(255,255,255,.12);color:#f5efe2;font-size:.78rem;font-weight:600;cursor:pointer}
+.h-speed:hover,.h-pip:hover{background:rgba(255,255,255,.22)}
