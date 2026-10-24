@@ -8944,7 +8944,7 @@ const helperPanel = document.getElementById('halkaHelperPanel');
 const helperToggle = document.getElementById('halkaHelperToggle');
 const helperAnswer = document.getElementById('halkaHelperAnswer');
 // ── Çember AI: Pollinations üzerinden gerçek cevap ──
-const CEMBER_PERSONA = `Sen Çember adında arkadaş canlısı bir yapay zekasın. Türkçe, kısa (1-2 cümle), doğal ve samimi cevaplar ver. HALKA platformuna dair sorular olursa bil: yazı/kitap/manga/çizim/fotoğraf/video/müzik paylaşımı, topluluklar, sohbet, dergi, sprint, rozetler. Uydurma bilgi verme; bilmiyorsan dürüstçe söyle. Mesaj: `;
+const CEMBER_PERSONA = `Sen Çember adında arkadaş canlısı bir yapay zekasın. Türkçe, kısa (1-2 cümle), doğal ve samimi cevaplar ver. Konudan sapma, cevabı tek düşünceyle bitir. HALKA platformuna dair sorular olursa bil: yazı/kitap/manga/çizim/fotoğraf/video/müzik paylaşımı, topluluklar, sohbet, dergi, sprint, rozetler. Uydurma bilgi verme; bilmiyorsan dürüstçe söyle. Mesaj: `;
 const CEMBER_MENTION = /@(çember|cember)/i;
 
 let cemberHistory = [];
@@ -8955,7 +8955,11 @@ async function cemberAskAI(text) {
     for (let tryN = 0; tryN < 2; tryN++) {
       const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai', { signal: AbortSignal.timeout(25000) });
       if (r.ok) {
-        const reply = (await r.text()).trim().slice(0, 600);
+        let reply = (await r.text()).trim();
+        if (reply.length > 800) {
+          const cut = Math.max(reply.lastIndexOf('.', 800), reply.lastIndexOf('!', 800), reply.lastIndexOf('?', 800));
+          reply = reply.slice(0, cut > 200 ? cut + 1 : 800);
+        }
         if (reply) return reply;
       }
     }
