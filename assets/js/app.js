@@ -82,7 +82,7 @@ const ENABLED_OAUTH_PROVIDERS = ['google', 'github'];
 const OAUTH_PROVIDER_NAMES = { google: 'Google', github: 'GitHub', facebook: 'Facebook', twitter: 'X', apple: 'Apple', discord: 'Discord' };
 // Twilio/SMS sağlayıcısı kurulduğunda true yap
 const PHONE_AUTH_ENABLED = false;
-const LEGAL_VERSIONS = { terms: '2026-10-11-v1', privacy: '2026-10-11-v1', community: '2026-10-11-v1' };
+const LEGAL_VERSIONS = { terms: '2026-10-24-v2', privacy: '2026-10-11-v1', community: '2026-10-24-v2' };
 const LEGAL_LABELS = { terms: 'Kullanıcı Sözleşmesi', privacy: 'Gizlilik ve KVKK Aydınlatma Metni', community: 'Topluluk Kuralları' };
 function legalCheckboxes(prefix = 'legal') {
   const statements = {
@@ -3849,6 +3849,7 @@ function renderLegalPage(type = 'terms') {
       <h2>Hesap ve güvenlik</h2><p>Doğru bilgiler vermeli, hesabının erişim bilgilerini korumalı ve hesabındaki hareketlerden sorumlu olmalısın. Başkasına ait hesapları kullanamaz veya platform güvenliğini aşmaya çalışamazsın.</p>
       <h2>İçerik ve haklar</h2><p>Paylaştığın içerik üzerindeki hakların sende kalır. İçeriği HALKA’da gösterebilmemiz ve seçtiğin gizlilik ayarına göre diğer kullanıcılara sunabilmemiz için sınırlı bir yayınlama ve barındırma izni verirsin. Yüklemek için gerekli haklara sahip olduğun içerikleri paylaşmalısın.</p>
       <h2>Yasak içerik ve yaptırımlar</h2><p>Yasa dışı, tehdit edici, taciz edici, başkasının haklarını ihlal eden veya zararlı yazılım içeren içerikler paylaşma. Kurallara aykırı içerik kaldırılabilir; ihlalin niteliğine göre hesabın kısıtlanabilir veya kapatılabilir.</p>
+      <h2>Fikri hak ihlali bildirimi (telif şikâyeti)</h2><p>Kendi eserinin izinsiz paylaşıldığını düşünüyorsan <strong>halka.destek1@gmail.com</strong> adresine bildirim gönder. Bildirimde şunlar bulunmalı: (1) ihlal olduğunu düşündüğün içeriğin bağlantısı, (2) hak sahibi olduğunu gösteren bilgi veya açıklama, (3) iletişim adresin. Bildirimler makul süre içinde incelenir; haklı bulunan ihlalde içerik kaldırılır ve tekrarlayan ihlallerde hesap kapatılabilir. İçeriği kaldırılan kullanıcı itirazını aynı adrese iletebilir.</p>
       <h2>Hizmet ve değişiklikler</h2><p>HALKA geliştirme aşamasındadır. Özellikler zamanla değişebilir. Sözleşme güncellendiğinde yeni sürüm ve yürürlük tarihi gösterilir; gerekli durumlarda yeniden onay istenir.</p>
       <p class="small">Bu metin ilk ürün taslağıdır; yürürlük ve iletişim bilgileri yayın öncesi netleştirilmelidir.</p>`,
     privacy: `<div class="eyebrow">Taslak · ${LEGAL_VERSIONS.privacy}</div><h1>Gizlilik ve KVKK Aydınlatma Metni</h1>
@@ -3859,8 +3860,7 @@ function renderLegalPage(type = 'terms') {
       <h2>Toplama yöntemi ve hakların</h2><p>Veriler hesap formları, uygulama kullanımı ve içerik yüklemeleri aracılığıyla elektronik ortamda toplanır. KVKK kapsamındaki başvuru ve haklarını, kimlik teyidi için gerekli bilgilerle birlikte yukarıdaki başvuru adresine iletebilirsin. Başvurular ilgili mevzuattaki usul ve süreler içinde yanıtlanır.</p>
       <p class="small">Bu metin taslaktır. Veri sorumlusunun kimliği, hukuki sebepler, saklama süreleri, aktarım detayları ve başvuru kanalı teyit edilmeden nihai aydınlatma metni olarak kullanılmamalıdır.</p>`,
     community: `<div class="eyebrow">Taslak · ${LEGAL_VERSIONS.community}</div><h1>Topluluk Kuralları</h1>
-      <p>HALKA’da farklı hikâyeler ve üretimler saygıyla buluşur. Katılırken şu kuralları kabul edersin:</p><h2>Saygılı iletişim</h2><p>Taciz, nefret söylemi, tehdit, kişisel bilgileri izinsiz yayma ve hedef gösterme yasaktır.</p><h2>Haklara saygı</h2><p>Yalnızca paylaşma hakkına sahip olduğun yazı, çizim, fotoğraf ve videoları yükle. Başkasının eserini kendininmiş gibi sunma.</p><h2>Güvenli paylaşımlar</h2><p>Dolandırıcılık, spam, zararlı bağlantı, yasa dışı içerik ve başkalarını tehlikeye sokabilecek yönlendirmeler paylaşma. Sorunlu içeriği HALKA yönetimine bildir.</p><h2>Uygulama</h2><p>İhlaller içerik kaldırma, özellik kısıtlama veya hesabı askıya alma sonucunu doğurabilir. Kararlara itiraz için HALKA destek kanalı yayınlandığında oradan başvurabilirsin.</p>
-      <p class="small">İletişim/itiraz kanalı bilgisi yayın öncesinde eklenecek.</p>`
+      <p>HALKA’da farklı hikâyeler ve üretimler saygıyla buluşur. Katılırken şu kuralları kabul edersin:</p><h2>Saygılı iletişim</h2><p>Taciz, nefret söylemi, tehdit, kişisel bilgileri izinsiz yayma ve hedef gösterme yasaktır.</p><h2>Haklara saygı</h2><p>Yalnızca paylaşma hakkına sahip olduğun yazı, çizim, fotoğraf ve videoları yükle. Başkasının eserini kendininmiş gibi sunma.</p><h2>Güvenli paylaşımlar</h2><p>Dolandırıcılık, spam, zararlı bağlantı, yasa dışı içerik ve başkalarını tehlikeye sokabilecek yönlendirmeler paylaşma. Sorunlu içeriği HALKA yönetimine bildir.</p><h2>Uygulama</h2><p>İhlaller içerik kaldırma, özellik kısıtlama veya hesabı askıya alma sonucunu doğurabilir. Telif/hak ihlali bildirimleri ve kararlara itirazlar <strong>halka.destek1@gmail.com</strong> adresine gönderilir.</p>`
   };
   const title = LEGAL_LABELS[type] || LEGAL_LABELS.terms;
   app.innerHTML = `<section class="hero"><div class="eyebrow">HALKA belgeleri</div><div class="legal-document">${content[type] || content.terms}</div><p><a class="btn ghost" href="#/auth?signup">Kayıt ekranına dön</a></p></section>`;
