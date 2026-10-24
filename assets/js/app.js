@@ -3191,6 +3191,104 @@ async function renderRead(id, query = '') {
 
   if (currentUser && (chapters || []).length) initReadingProgress(post, chapters);
 
+  app.querySelectorAll('.ch-like').forEach(btn => btn.addEventListener('click', async () => {
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    const chId = btn.dataset.ch;
+    const liked = myChapterLikes.has(chId);
+    btn.disabled = true;
+    const { error } = liked
+      ? await sb.from('chapter_likes').delete().eq('chapter_id', chId).eq('user_id', currentUser.id)
+      : await sb.from('chapter_likes').insert({ chapter_id: chId, user_id: currentUser.id });
+    btn.disabled = false;
+    if (error) return alert('Beğeni kaydedilemedi: ' + error.message);
+    if (liked) {
+      myChapterLikes.delete(chId);
+      chapterLikeCounts[chId] = Math.max(0, (chapterLikeCounts[chId] || 1) - 1);
+    } else {
+      myChapterLikes.add(chId);
+      chapterLikeCounts[chId] = (chapterLikeCounts[chId] || 0) + 1;
+    }
+    btn.classList.toggle('liked', !liked);
+    btn.innerHTML = `${liked ? '🤍' : '❤️'} <span>${chapterLikeCounts[chId]}</span>`;
+  }));
+
+  // ── Etkileşim paketi bağlama ──
+  document.getElementById('shareCardBtn')?.addEventListener('click', () => makeShareCard(post, displayName(profile)));
+  const rxBox = document.getElementById('postReactions');
+  const renderPostRx = () => { if (rxBox) rxBox.innerHTML = REACTIONS.map(e => `<button class="react-chip${postRx.mine.has(e) ? ' on' : ''}" data-emoji="${e}" type="button">${e} <span>${postRx.counts[e] || 0}</span></button>`).join(''); };
+  renderPostRx();
+  rxBox?.addEventListener('click', async e => {
+    const b = e.target.closest('.react-chip'); if (!b) return;
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    const em = b.dataset.emoji, mine = postRx.mine.has(em);
+    const { error } = mine
+      ? await sb.from('post_reactions').delete().eq('post_id', id).eq('user_id', currentUser.id).eq('emoji', em)
+      : await sb.from('post_reactions').insert({ post_id: id, user_id: currentUser.id, emoji: em });
+    if (!error) { mine ? (postRx.mine.delete(em), postRx.counts[em]--) : (postRx.mine.add(em), postRx.counts[em] = (postRx.counts[em] || 0) + 1); renderPostRx(); }
+  });
+  app.querySelectorAll('.ch-poll').forEach(b => b.addEventListener('click', async () => {
+    const raw = prompt('Bölüm sonu anketini yaz — seçenekleri virgülle ayır (2-4):');
+    if (!raw) return;
+    const opts = raw.split(/[,;]/).map(s => s.trim()).filter(Boolean).slice(0, 4);
+    if (opts.length < 2) return alert('En az 2 seçenek gerekli.');
+    const { error } = await sb.from('chapter_polls').insert({ chapter_id: b.dataset.ch, post_id: id, options: opts });
+    if (error) return alert('Anket açılamadı: ' + error.message);
+    renderRead(id);
+  }));
+  app.querySelectorAll('.poll-opt').forEach(b => b.addEventListener('click', async () => {
+    if (!currentUser) { location.hash = '#/auth?signup'; return; }
+    const { error } = await sb.from('chapter_poll_votes').upsert({ poll_id: b.dataset.poll, user_id: currentUser.id, option_index: Number(b.dataset.idx) });
+    if (error) return alert('Oy kaydedilemedi: ' + error.message);
+    renderRead(id);
+  }));
+  app.querySelectorAll('.poll-close').forEach(b => b.addEventListener('click', async () => {
+    const { error } = await sb.from('chapter_polls').update({ closed_at: new Date().toISOString() }).eq('id', b.dataset.poll);
+    if (error) return alert('Kapatılamadı: ' + error.message);
+    renderRead(id);
+  }));
+  document.getElementById('heatBtn')?.addEventListener('click', () => toggleHeatMap(id));
+  initDwellTracking(id);
+
+  // Manga okuma modu: dikey akış / tek sayfa / sağdan sola
+  const modeBar = document.getElementById('mangaModeBar');
+  if (modeBar) {
+    const wrap = document.getElementById('chaptersWrap');
+    const nav = document.getElementById('mangaPageNav');
+    const ind = document.getElementById('mpIndicator');
+    const sections = [...wrap.querySelectorAll('.chapter')];
+    let cur = 0;
+    let mode = localStorage.getItem('halka_manga_mode') || 'scroll';
+    const apply = () => {
+      modeBar.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.mode === mode));
+      const paged = mode !== 'scroll';
+      nav.hidden = !paged;
+      nav.style.direction = mode === 'rtl' ? 'rtl' : 'ltr';
+      sections.forEach((s, i) => { s.hidden = paged && i !== cur; });
+      if (paged) ind.textContent = `${cur + 1} / ${sections.length}`;
+    };
+    const go = d => {
+      cur = Math.min(sections.length - 1, Math.max(0, cur + d));
+      apply();
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+    modeBar.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+      mode = c.dataset.mode;
+      localStorage.setItem('halka_manga_mode', mode);
+      apply();
+    }));
+    document.getElementById('mpPrev').addEventListener('click', () => go(-1));
+    document.getElementById('mpNext').addEventListener('click', () => go(1));
+    const keyNav = e => {
+      if (mode === 'scroll' || !document.getElementById('chaptersWrap')) return document.removeEventListener('keydown', keyNav);
+      const fwd = mode === 'rtl' ? e.key === 'ArrowLeft' : e.key === 'ArrowRight';
+      const back = mode === 'rtl' ? e.key === 'ArrowRight' : e.key === 'ArrowLeft';
+      if (fwd) go(1); else if (back) go(-1);
+    };
+    document.addEventListener('keydown', keyNav);
+    apply();
+  }
+
+
   if (!isOwner) return;
 
   if (isChapteredKind(post.kind)) bindRichTextTools(document.getElementById('newChapterTools'), document.getElementById('cbody'));
@@ -3300,103 +3398,6 @@ async function renderRead(id, query = '') {
     showMessage('Bölüm yayınlandı — artık herkes görebilir.');
     renderRead(id);
   }));
-  app.querySelectorAll('.ch-like').forEach(btn => btn.addEventListener('click', async () => {
-    if (!currentUser) { location.hash = '#/auth?signup'; return; }
-    const chId = btn.dataset.ch;
-    const liked = myChapterLikes.has(chId);
-    btn.disabled = true;
-    const { error } = liked
-      ? await sb.from('chapter_likes').delete().eq('chapter_id', chId).eq('user_id', currentUser.id)
-      : await sb.from('chapter_likes').insert({ chapter_id: chId, user_id: currentUser.id });
-    btn.disabled = false;
-    if (error) return alert('Beğeni kaydedilemedi: ' + error.message);
-    if (liked) {
-      myChapterLikes.delete(chId);
-      chapterLikeCounts[chId] = Math.max(0, (chapterLikeCounts[chId] || 1) - 1);
-    } else {
-      myChapterLikes.add(chId);
-      chapterLikeCounts[chId] = (chapterLikeCounts[chId] || 0) + 1;
-    }
-    btn.classList.toggle('liked', !liked);
-    btn.innerHTML = `${liked ? '🤍' : '❤️'} <span>${chapterLikeCounts[chId]}</span>`;
-  }));
-
-  // ── Etkileşim paketi bağlama ──
-  document.getElementById('shareCardBtn')?.addEventListener('click', () => makeShareCard(post, displayName(profile)));
-  const rxBox = document.getElementById('postReactions');
-  const renderPostRx = () => { if (rxBox) rxBox.innerHTML = REACTIONS.map(e => `<button class="react-chip${postRx.mine.has(e) ? ' on' : ''}" data-emoji="${e}" type="button">${e} <span>${postRx.counts[e] || 0}</span></button>`).join(''); };
-  renderPostRx();
-  rxBox?.addEventListener('click', async e => {
-    const b = e.target.closest('.react-chip'); if (!b) return;
-    if (!currentUser) { location.hash = '#/auth?signup'; return; }
-    const em = b.dataset.emoji, mine = postRx.mine.has(em);
-    const { error } = mine
-      ? await sb.from('post_reactions').delete().eq('post_id', id).eq('user_id', currentUser.id).eq('emoji', em)
-      : await sb.from('post_reactions').insert({ post_id: id, user_id: currentUser.id, emoji: em });
-    if (!error) { mine ? (postRx.mine.delete(em), postRx.counts[em]--) : (postRx.mine.add(em), postRx.counts[em] = (postRx.counts[em] || 0) + 1); renderPostRx(); }
-  });
-  app.querySelectorAll('.ch-poll').forEach(b => b.addEventListener('click', async () => {
-    const raw = prompt('Bölüm sonu anketini yaz — seçenekleri virgülle ayır (2-4):');
-    if (!raw) return;
-    const opts = raw.split(/[,;]/).map(s => s.trim()).filter(Boolean).slice(0, 4);
-    if (opts.length < 2) return alert('En az 2 seçenek gerekli.');
-    const { error } = await sb.from('chapter_polls').insert({ chapter_id: b.dataset.ch, post_id: id, options: opts });
-    if (error) return alert('Anket açılamadı: ' + error.message);
-    renderRead(id);
-  }));
-  app.querySelectorAll('.poll-opt').forEach(b => b.addEventListener('click', async () => {
-    if (!currentUser) { location.hash = '#/auth?signup'; return; }
-    const { error } = await sb.from('chapter_poll_votes').upsert({ poll_id: b.dataset.poll, user_id: currentUser.id, option_index: Number(b.dataset.idx) });
-    if (error) return alert('Oy kaydedilemedi: ' + error.message);
-    renderRead(id);
-  }));
-  app.querySelectorAll('.poll-close').forEach(b => b.addEventListener('click', async () => {
-    const { error } = await sb.from('chapter_polls').update({ closed_at: new Date().toISOString() }).eq('id', b.dataset.poll);
-    if (error) return alert('Kapatılamadı: ' + error.message);
-    renderRead(id);
-  }));
-  document.getElementById('heatBtn')?.addEventListener('click', () => toggleHeatMap(id));
-  initDwellTracking(id);
-
-  // Manga okuma modu: dikey akış / tek sayfa / sağdan sola
-  const modeBar = document.getElementById('mangaModeBar');
-  if (modeBar) {
-    const wrap = document.getElementById('chaptersWrap');
-    const nav = document.getElementById('mangaPageNav');
-    const ind = document.getElementById('mpIndicator');
-    const sections = [...wrap.querySelectorAll('.chapter')];
-    let cur = 0;
-    let mode = localStorage.getItem('halka_manga_mode') || 'scroll';
-    const apply = () => {
-      modeBar.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.mode === mode));
-      const paged = mode !== 'scroll';
-      nav.hidden = !paged;
-      nav.style.direction = mode === 'rtl' ? 'rtl' : 'ltr';
-      sections.forEach((s, i) => { s.hidden = paged && i !== cur; });
-      if (paged) ind.textContent = `${cur + 1} / ${sections.length}`;
-    };
-    const go = d => {
-      cur = Math.min(sections.length - 1, Math.max(0, cur + d));
-      apply();
-      wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    };
-    modeBar.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
-      mode = c.dataset.mode;
-      localStorage.setItem('halka_manga_mode', mode);
-      apply();
-    }));
-    document.getElementById('mpPrev').addEventListener('click', () => go(-1));
-    document.getElementById('mpNext').addEventListener('click', () => go(1));
-    const keyNav = e => {
-      if (mode === 'scroll' || !document.getElementById('chaptersWrap')) return document.removeEventListener('keydown', keyNav);
-      const fwd = mode === 'rtl' ? e.key === 'ArrowLeft' : e.key === 'ArrowRight';
-      const back = mode === 'rtl' ? e.key === 'ArrowRight' : e.key === 'ArrowLeft';
-      if (fwd) go(1); else if (back) go(-1);
-    };
-    document.addEventListener('keydown', keyNav);
-    apply();
-  }
-
   // Manga kapak üretici: sayfa seç → başlık bandıyla kompoze et → cover_path'e yaz
   document.getElementById('mangaCoverBtn')?.addEventListener('click', () => {
     const pages = chapters.filter(c => c.media_url);
