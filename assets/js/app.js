@@ -9125,7 +9125,7 @@ document.getElementById('halkaHelperForm').addEventListener('submit', async even
   const ai = await cemberAskAI(rawQ);
   think.remove();
   if (ai) { cemberHistory.push({ q: rawQ, a: ai }); cemberHistory = cemberHistory.slice(-6); cemberBubble(esc(ai), 'bot'); }
-  else keywordReply('Bağlantı kuramadım — birazdan tekrar dener misin? 🌱<br><br>');
+  else cemberBubble('Bağlantı kuramadım, birazdan tekrar deneyebilirsin. 🌱<br>O sırada aşağıdaki seçeneklerden sana uygun olanı seçebilirsin.', 'bot');
 });
 
 // ── Etkileşim paketi yardımcıları ──
