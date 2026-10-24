@@ -8781,6 +8781,7 @@ document.getElementById('halkaHelperClose').addEventListener('click', () => {
 });
 helperPanel.querySelectorAll('[data-help]').forEach(button => button.addEventListener('click', () => {
   if (button.dataset.help === 'oneri') return cemberSuggest();
+  if (button.dataset.help === 'gorev') return cemberTask();
   showHelperReply(button.dataset.help, true);
 }));
 
@@ -8817,6 +8818,11 @@ async function cemberSuggest() {
     if (st > 0) tips.push(`🔗 Zincirin <strong>${st} gün</strong> — bugün bir şey paylaşırsan ${st + 1} olur.`);
     else tips.push('🔗 Zincirin şu an sıfır — küçük de olsa bir şey paylaş, yarın başlasın.');
 
+    const { data: lastPost } = await sb.from('posts').select('created_at').eq('author_id', currentUser.id)
+      .order('created_at', { ascending: false }).limit(1).maybeSingle();
+    const idleDays = lastPost ? Math.floor((now - +new Date(lastPost.created_at)) / 86400000) : null;
+    if (idleDays !== null && idleDays >= 5) tips.push(`🕰️ Son eserin <strong>${idleDays} gün</strong> önce — istersen "Bugünün görevi" düğmesinden hafif bir görev al.`);
+
     const { count: myPosts } = await sb.from('posts').select('id', { count: 'exact', head: true }).eq('author_id', currentUser.id).eq('is_draft', false);
     if (!myPosts) tips.push('🌱 Henüz yayınlanmış eserin yok — ilk eserin İlk Eser rozetini açar ✦');
 
@@ -8833,6 +8839,34 @@ async function cemberSuggest() {
   } catch (err) {
     helperAnswer.textContent = 'Öneri üretirken bir şey takıldı — ama niyetim iyiydi. Tekrar dene?';
   }
+}
+
+// Çember mini görevleri: her gün takvim gününe göre deterministik bir üretim görevi.
+const CEMBER_TASKS = [
+  ['✍️ 100 kelime yaz — mükemmel olmasına gerek yok, sadece başla', '#/write'],
+  ['📝 Raftaki bir taslağı aç ve 10 dakika ilerlet', '#/profile'],
+  ['💬 Bir esere içten bir yorum bırak', '#/'],
+  ['🎨 Bir eskiz, foto veya kısa klip paylaş', '#/create/drawing'],
+  ['⏱️ 10 dakikalık yazma sprinti yap', '#/write'],
+  ['🔬 Kritik bekleyen bir esere geri bildirim ver', '#/kritik'],
+  ['⚡ Aktif bir meydan okumaya eserle katıl', '#/meydan-okuma'],
+  ['👥 Bir toplulukta üretimini paylaş ya da selam ver', '#/section/topluluklar'],
+  ['📖 Serilerinden birine yeni bölüm ekle', '#/profile'],
+  ['🤝 Ortak üretim odasında bir paragraf yaz', '#/odalar'],
+];
+function cemberTask() {
+  const dayKey = new Date().toISOString().slice(0, 10);
+  const dayNum = Math.floor(Date.now() / 86400000);
+  const [text, link] = CEMBER_TASKS[dayNum % CEMBER_TASKS.length];
+  let done = false;
+  try { done = JSON.parse(localStorage.getItem('halka_daily_task') || '{}').date === dayKey; } catch {}
+  helperAnswer.innerHTML = done
+    ? `✅ Bugünkü görevi tamamladın: <em>"${esc(text)}"</em> — eline sağlık! Yarın yeni görev geliyor.`
+    : `🎯 <strong>Bugünün mini görevi:</strong> ${esc(text)} — <a href="${link}">şuradan başlayabilirsin</a>.<br><br><button class="btn small" id="cemberTaskDone" type="button">Yaptım ✅</button>`;
+  document.getElementById('cemberTaskDone')?.addEventListener('click', () => {
+    try { localStorage.setItem('halka_daily_task', JSON.stringify({ date: dayKey })); } catch {}
+    cemberCelebrate('Görev tamam! Bugün de ürettin — zincir güçleniyor. 🔥');
+  });
 }
 document.getElementById('halkaHelperForm').addEventListener('submit', event => {
   event.preventDefault();
