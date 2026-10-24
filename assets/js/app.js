@@ -9109,10 +9109,10 @@ document.getElementById('halkaHelperForm').addEventListener('submit', async even
     : /sohbet|mesaj|grup/.test(question) ? 'chat'
     : /şifre|sifre|güven|guven|hesap/.test(question) ? 'security'
     : /foto|görsel|gorsel|resim|video/.test(question) ? 'image' : 'help';
-  const keywordReply = () => {
+  const keywordReply = (prefix = '') => {
     const option = helperReplies[key] || helperReplies.help;
     const [r] = typeof option === 'function' ? option() : option;
-    cemberBubble(esc(r), 'bot');
+    cemberBubble(prefix + esc(r), 'bot');
   };
   event.currentTarget.reset();
   if (!rawQ) return;
@@ -9125,7 +9125,7 @@ document.getElementById('halkaHelperForm').addEventListener('submit', async even
   const ai = await cemberAskAI(rawQ);
   think.remove();
   if (ai) { cemberHistory.push({ q: rawQ, a: ai }); cemberHistory = cemberHistory.slice(-6); cemberBubble(esc(ai), 'bot'); }
-  else { cemberBubble('Bağlantı kuramadım — birazdan tekrar dener misin? 🌱', 'bot'); keywordReply(); }
+  else keywordReply('Bağlantı kuramadım — birazdan tekrar dener misin? 🌱<br><br>');
 });
 
 // ── Etkileşim paketi yardımcıları ──
