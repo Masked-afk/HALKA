@@ -8947,13 +8947,21 @@ const helperAnswer = document.getElementById('halkaHelperAnswer');
 const CEMBER_PERSONA = `Sen Çember'sin, HALKA adlı Türkçe üretim topluluğunun maskot yapay zekasısın. Her konuda samimi sohbet edersin; selamlaşma ve gündelik konuşmalara doğal, kısa karşılıklar ver. HALKA özellikleri sorulursa şunları bilirsin: yazı/kitap/manga/light novel/çizim/fotoğraf/video/müzik paylaşımı, topluluklar, grup sohbetleri, okuma kulüpleri, kolektif dergi, yazma sprinti, bölüm anketleri, rozetler, Ayın Halka'sı. Cevapların Türkçe, sıcak, 1-3 cümle olsun, arada emoji kullan. Kullanıcının mesajı: `;
 const CEMBER_MENTION = /@(çember|cember)/i;
 
+let cemberHistory = [];
 async function cemberAskAI(text) {
   try {
-    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(CEMBER_PERSONA + text), { signal: AbortSignal.timeout(16000) });
+    const hist = cemberHistory.slice(-3).map(h => `Kullanıcı: ${h.q} | Çember: ${h.a}`).join(' ;; ');
+    const prompt = CEMBER_PERSONA + (hist ? `Önceki konuşma: ${hist} ` : '') + text;
+    const r = await fetch('https://text.pollinations.ai/' + encodeURIComponent(prompt) + '?model=openai', { signal: AbortSignal.timeout(16000) });
     if (!r.ok) throw new Error(String(r.status));
     const reply = (await r.text()).trim().slice(0, 600);
     return reply || null;
   } catch { return null; }
+}
+function cemberBubble(html, cls) {
+  if (helperAnswer.dataset.init !== '1') { helperAnswer.innerHTML = ''; helperAnswer.dataset.init = '1'; }
+  helperAnswer.insertAdjacentHTML('beforeend', `<div class="cember-msg ${cls}">${html}</div>`);
+  helperAnswer.scrollTop = helperAnswer.scrollHeight;
 }
 
 // @çember etiketine bot cevabı — gönderenin istemcisi üretir
@@ -9101,9 +9109,16 @@ document.getElementById('halkaHelperForm').addEventListener('submit', async even
   showHelperReply(key); };
   event.currentTarget.reset();
   if (!rawQ) return;
-  helperAnswer.textContent = '🤖 Çember düşünüyor…';
+  cemberBubble(esc(rawQ), 'user');
+  const think = document.createElement('div');
+  think.className = 'cember-msg bot thinking';
+  think.textContent = '🤖 yazıyor…';
+  helperAnswer.appendChild(think);
+  helperAnswer.scrollTop = helperAnswer.scrollHeight;
   const ai = await cemberAskAI(rawQ);
-  if (ai) { helperAnswer.textContent = ai; } else keywordReply();
+  think.remove();
+  if (ai) { cemberHistory.push({ q: rawQ, a: ai }); cemberHistory = cemberHistory.slice(-6); cemberBubble(esc(ai), 'bot'); }
+  else keywordReply();
 });
 
 // ── Etkileşim paketi yardımcıları ──
