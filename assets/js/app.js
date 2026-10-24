@@ -5327,7 +5327,7 @@ const SECTIONS = {
   ]},
   kesfet: { label: 'Keşfet', type: null, groups: [
     { title: 'Keşfet biçimi', param: 'sub', items: [['Normal keşfet', 'normal'], ['Hızlı keşfet', 'hizli']] },
-    { title: 'Diğer', param: 'sub', items: [['Yazarlar', 'yazarlar'], ['Rastgele bir eser', 'rastgele']] }
+    { title: 'Diğer', param: 'sub', items: [['Yazarlar', 'yazarlar'], ['📖 Dergi', 'dergi'], ['Rastgele bir eser', 'rastgele']] }
   ]}
 };
 
@@ -6251,6 +6251,7 @@ function bindQuickFeed(feed) {
 async function renderDiscover(query = '') {
   const params = new URLSearchParams(query);
   if (params.get('sub') === 'yazarlar') return renderAuthors();
+  if (params.get('sub') === 'dergi') return renderIssues();
   if (params.get('sub') === 'rastgele') return openRandom();
   const quick = params.get('sub') === 'hizli';
   const themeId = params.get('theme') || '';
@@ -6386,17 +6387,27 @@ async function renderAuthors() {
   app.innerHTML = `
     <section class="hero" style="padding-bottom:8px"><div class="eyebrow">Keşfet</div><h1>Yazarlar</h1></section>
     <div id="authors">${loadingBlock('Yazarlar yükleniyor…')}</div>`;
-  const { data, error } = await sb.from('profiles').select('id,username,display_name,profile_visibility').eq('profile_visibility', 'public').limit(60);
+  const { data, error } = await sb.from('profiles').select('id,username,display_name,bio,avatar_path,cover_path,profile_accent,profile_visibility').eq('profile_visibility', 'public').limit(60);
   if (location.hash !== myHash) return;
   const box = document.getElementById('authors');
   if (!box) return;
   if (error) { box.innerHTML = `<div class="empty">Yazarlar yüklenemedi.<br><span class="small">${esc(error.message)}</span></div>`; return; }
   if (!(data || []).length) { box.innerHTML = '<div class="empty">Henüz kimse katılmamış.</div>'; return; }
-  box.innerHTML = data.map(p => `
-    <a class="card" href="#/user/${encodeURIComponent(p.id)}" style="display:flex;gap:14px;align-items:center">
-      <div class="avatar">${initials(displayName(p))}</div>
-      <div><h3 style="margin:0">${esc(displayName(p))}</h3><div class="meta">@${esc(p.username || '')}</div></div>
-    </a>`).join('');
+  const cards = await Promise.all(data.map(async p => ({
+    p, av: await signedProfileImage(p.avatar_path), cov: await signedProfileImage(p.cover_path)
+  })));
+  if (location.hash !== myHash) return;
+  box.innerHTML = cards.map(({ p, av, cov }) => {
+    const acc = profileAccent(p);
+    return `<a class="card author-card" href="#/user/${encodeURIComponent(p.id)}">
+      <div class="author-cover" style="${cov ? `background-image:url('${esc(cov)}')` : `background:linear-gradient(135deg,${acc},var(--card))`}"></div>
+      <div style="display:flex;gap:14px;align-items:center;padding:12px 14px">
+        <div class="avatar" style="border:2px solid ${acc}">${av ? `<img src="${esc(av)}" alt="">` : initials(displayName(p))}</div>
+        <div style="min-width:0"><h3 style="margin:0">${esc(displayName(p))}</h3><div class="meta">@${esc(p.username || '')}</div>
+        ${p.bio ? `<div class="small" style="margin-top:4px">${esc(p.bio.slice(0, 90))}${p.bio.length > 90 ? '…' : ''}</div>` : ''}</div>
+      </div>
+    </a>`;
+  }).join('');
 }
 
 async function openRandom() {
